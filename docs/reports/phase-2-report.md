@@ -8,9 +8,8 @@ Phase 2
 
 COMPLETED
 
-Implementation, tests and smoke PASS. This completion report is prepared for the
-implementation checkpoint; Git publication is recorded below and the
-machine-readable state stays in_progress until publication gates pass.
+Implementation, required tests, smoke and implementation/tag publication PASS.
+The verified completion state is recorded in the follow-up metadata commit.
 
 ## Prompt Source
 
@@ -127,6 +126,9 @@ No integration test modifies application data. All listed tests PASS, no skips.
 9. Normal development Compose restored: PostgreSQL/Redis/API healthy, one worker
    running, migration versions 1/2/3 present, /ready 200. Runtime logs checked
    against actual configured credentials and raw driver patterns: PASS.
+10. Prospective completed-state validator with the real checkpoint/report and
+    annotated tag: PASS. Git publication, staged diff/security checks and
+    unchanged historical migrations verified; completion-state validator PASS.
 
 The Redis CLI emitted an empty optional-auth diagnostic during smoke, then
 returned a stream ID / deletion count and successfully executed both commands;
@@ -173,9 +175,11 @@ codes keep credentials, payloads and raw DB errors out of API/runtime logs.
 
 Branch: codex/phase1-api-correctness (existing shared automation branch).
 Claim commit: de7b1b9.
-Implementation checkpoint: pending creation; recorded in publication metadata.
-Annotated tag: phase2-single-worker (pending creation).
-GitHub push: pending; state remains in_progress until verified.
+Implementation checkpoint: 657f47b4c0767f9ae63adc110d522e998fa9d1c4.
+Annotated tag: phase2-single-worker, resolving to that exact checkpoint.
+GitHub push: SUCCESS — branch + annotated tag pushed atomically and remote SHAs
+verified at 2026-10-04T18:53:50Z. Completion metadata is a follow-up normal commit;
+branch HEAD can be newer than this implementation checkpoint.
 No main merge, force push, reset or history rewrite.
 
 ## Documentation Updated
