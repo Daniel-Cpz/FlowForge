@@ -4,12 +4,12 @@
   "current_phase": 1,
   "status": "completed",
   "report": "docs/reports/phase-1-report.md",
-  "next_prompt": null,
-  "last_processed_phase": 0,
+  "next_prompt": "automation/prompts/phase-2.md",
+  "last_processed_phase": 1,
   "branch": "codex/phase1-api-correctness",
   "commit": "6d197f25088bdfcb1aa8485590e839218eac3813",
   "tag": "phase1-api-correctness",
-  "updated_at": "2026-10-04T17:46:04Z",
+  "updated_at": "2026-10-04T18:21:00Z",
   "prompt_source": "manual",
   "prompt_path": null
 }
