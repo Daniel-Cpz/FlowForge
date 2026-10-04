@@ -24,6 +24,8 @@ jobs:
       FLOWFORGE_TEST_POSTGRES_URL: postgres://flowforge:ci-only-ephemeral-password@localhost:5432/flowforge?sslmode=disable
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod

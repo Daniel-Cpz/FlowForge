@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "project": "FlowForge",
+  "current_phase": 1,
+  "status": "in_progress",
+  "report": null,
+  "next_prompt": null,
+  "last_processed_phase": 0,
+  "branch": "codex/phase1-api-correctness",
+  "commit": null,
+  "tag": null,
+  "updated_at": "2026-10-04T17:13:44Z"
+}

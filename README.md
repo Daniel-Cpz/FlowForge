@@ -1,13 +1,14 @@
 # FlowForge
 
-Distributed Job Processing Platform — **Phase 0: Engineering Foundation**.
+Distributed Job Processing Platform for backend, distributed systems, and cloud
+engineering.
 
 ## Overview
 
 FlowForge is a Go backend project exploring reliable asynchronous job processing.
-This release persists and reads jobs; it does **not** execute them. PostgreSQL is
-the durable source of truth. API and worker are separate processes sharing a
-small modular codebase.
+The committed foundation persists and reads jobs; it does **not** execute them.
+PostgreSQL is the durable source of truth. API and worker are separate processes
+sharing a small modular codebase.
 
 ## Why FlowForge
 
@@ -74,7 +75,12 @@ curl http://localhost:8080/api/v1/jobs
 curl http://localhost:8080/api/v1/jobs/UUID
 ```
 
-### API contract
+### Committed foundation API contract
+
+This is the Phase 0 baseline contract. Phase 1 API correctness work is in
+progress, including pending decoding and pagination changes. Its final contract
+and completion evidence will be recorded in an independent phase report after
+the phase's validation and commit gates pass.
 
 | Method | Path | Behavior |
 |---|---|---|
@@ -133,6 +139,8 @@ ephemeral PostgreSQL service and runs integration tests.
 | `make build` | Build API, worker and migration binaries in bin/ |
 | `make test` | All tests (integration requires configured database) |
 | `make test-unit` | Unit tests without external services |
+| `make test-phase-state` | Focused state-validator tests without application services |
+| `make validate-phase-state` | Validate the phase state, report identity, and Git evidence |
 | `make run-api` / `make run-worker` | Run a process using exported configuration |
 | `make docker-up` / `make docker-down` | Start/build or stop development environment |
 | `make migrate-up` | Apply all pending migrations |
@@ -163,6 +171,7 @@ Phase 0 stores no application state there. All published ports bind to loopback.
 - Health/readiness, bounded HTTP server settings, SIGINT/SIGTERM shutdown
 - Docker development environment, Makefile and CI workflow
 - Architecture, failure model, lifecycle, roadmap and ADR documentation
+- Machine-readable phase tracking, independent report template, and state validator
 
 Redis infrastructure available.
 Redis-backed job queue is not implemented yet.
@@ -182,11 +191,34 @@ dashboard, metrics/tracing, failure injection, benchmarking and cloud deployment
 
 ## Roadmap
 
-The next step is **Phase 1 — Job Persistence + API Correctness**: tighten input
+The current work is **Phase 1 — Job Persistence + API Correctness**: tighten input
 semantics, expand database/API contract coverage, and decide pagination and
 transaction boundaries. See the [Phase 0–10 roadmap](docs/development-roadmap.md).
 This repository does not claim exactly-once execution. Future delivery is planned
 as at-least-once; business side effects will need their own idempotency safeguards.
+
+## Development Phases / Automation
+
+This README describes the **whole project**: its purpose, architecture, setup,
+and current capabilities. Each phase has its own `docs/reports/phase-N-report.md`
+for that phase's scope, tests, failures, limitations, and Git references. Both
+documents are required at phase completion and are updated independently.
+Keep reports from earlier phases.
+
+- [Phase state](automation/state.json): machine-readable current phase and status
+- [Phase reports](docs/reports/index.md): independent evidence and report index
+- [Report template](docs/phase-report-template.md): required report sections
+- [Automation protocol](docs/phase-automation.md): schema, completion gates, and handoff
+- `automation/prompts/`: next-phase prompts written by external Automation
+
+GitHub repository state is the shared automation source of truth. Automation
+reads `status`, `report`, `last_processed_phase`, and `next_prompt` from state,
+then reads the exact matching report. This README does not substitute for a
+phase report. Phase 1 is `in_progress`; no Phase 1 completion report or next
+prompt is claimed. The separate infrastructure report does not complete Phase 1.
+
+Validate with `go run ./scripts/validate-phase-state`; run focused tests with
+`go test -count=1 ./scripts/validate-phase-state` or the matching Make targets.
 
 ## License
 

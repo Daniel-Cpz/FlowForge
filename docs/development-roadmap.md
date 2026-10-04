@@ -1,6 +1,11 @@
 # Development roadmap
 
-Only Phase 0 is implemented. All later phases are Planned.
+Phase 0 is the committed foundation. Phase 1 is in progress; later phases are
+Planned. Machine-readable status is in
+[`automation/state.json`](../automation/state.json). The whole-project
+[`README.md`](../README.md) and each independent `docs/reports/phase-N-report.md`
+are both required on phase completion. See the
+[protocol](phase-automation.md) and [report template](phase-report-template.md).
 
 | Phase | Scope |
 |---|---|
