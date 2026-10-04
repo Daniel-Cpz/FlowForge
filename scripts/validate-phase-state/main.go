@@ -21,6 +21,8 @@ type State struct {
 	Project            string  `json:"project"`
 	CurrentPhase       int     `json:"current_phase"`
 	Status             string  `json:"status"`
+	PromptSource       string  `json:"prompt_source"`
+	PromptPath         *string `json:"prompt_path"`
 	Report             *string `json:"report"`
 	NextPrompt         *string `json:"next_prompt"`
 	LastProcessedPhase int     `json:"last_processed_phase"`
@@ -32,7 +34,8 @@ type State struct {
 
 var fields = map[string]bool{
 	"schema_version": false, "project": false, "current_phase": false,
-	"status": false, "report": true, "next_prompt": true,
+	"status": false, "prompt_source": false, "prompt_path": true,
+	"report": true, "next_prompt": true,
 	"last_processed_phase": false, "branch": true, "commit": true,
 	"tag": true, "updated_at": true,
 }
@@ -136,10 +139,27 @@ func validate(root string, s State) error {
 	for name, value := range map[string]*string{
 		"branch": s.Branch, "commit": s.Commit, "tag": s.Tag,
 		"report": s.Report, "next_prompt": s.NextPrompt, "updated_at": s.UpdatedAt,
+		"prompt_path": s.PromptPath,
 	} {
 		if value != nil && (strings.TrimSpace(*value) == "" || strings.TrimSpace(*value) != *value) {
 			return fmt.Errorf("%s must be null or a nonblank value without surrounding whitespace", name)
 		}
+	}
+	switch s.PromptSource {
+	case "manual":
+		if s.PromptPath != nil {
+			return errors.New("manual prompt_source requires prompt_path null")
+		}
+	case "automation":
+		expected := fmt.Sprintf("automation/prompts/phase-%d.md", s.CurrentPhase)
+		if s.PromptPath == nil || *s.PromptPath != expected {
+			return fmt.Errorf("automation prompt_path must be %s for current_phase", expected)
+		}
+		if _, err := regularFile(root, *s.PromptPath); err != nil {
+			return fmt.Errorf("prompt_path: %w", err)
+		}
+	default:
+		return errors.New("prompt_source must be manual or automation")
 	}
 	if s.UpdatedAt != nil {
 		if _, err := time.Parse(time.RFC3339Nano, *s.UpdatedAt); err != nil || !strings.HasSuffix(*s.UpdatedAt, "Z") {

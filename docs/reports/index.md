@@ -9,5 +9,8 @@ never infer the phase from report ordering.
 - [Automation protocol](../phase-automation.md)
 - [Automation infrastructure report](phase-automation-infrastructure-report.md)
 
-No numbered-phase completion report is published yet. Phase 1 is in progress.
-The infrastructure report is independent and does not certify Phase 1 completion.
+- [Phase 1 — API and persistence correctness](phase-1-report.md)
+
+The numbered report contains Phase 1's own evidence. Read state for its published
+completion/Git checkpoint; the infrastructure report is independent and cannot
+substitute for phase completion.

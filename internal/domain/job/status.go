@@ -16,3 +16,12 @@ const (
 func (s Status) Terminal() bool {
 	return s == Succeeded || s == DeadLetter || s == Cancelled || s == TimedOut
 }
+
+func (s Status) Valid() bool {
+	switch s {
+	case Queued, Running, Succeeded, Failed, Retrying, DeadLetter, Cancelled, TimedOut:
+		return true
+	default:
+		return false
+	}
+}

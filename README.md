@@ -15,7 +15,7 @@ sharing a small modular codebase.
 The engineering problem is coordinating work despite crashes, retries, duplicate
 delivery and changing load. Those guarantees need explicit state transitions,
 durable records and testable failure handling before adding scheduling features.
-No throughput, recovery-time or execution guarantee is claimed in Phase 0.
+No throughput, recovery-time or execution guarantee is claimed.
 
 ## Architecture
 
@@ -75,12 +75,11 @@ curl http://localhost:8080/api/v1/jobs
 curl http://localhost:8080/api/v1/jobs/UUID
 ```
 
-### Committed foundation API contract
+### API contract
 
-This is the Phase 0 baseline contract. Phase 1 API correctness work is in
-progress, including pending decoding and pagination changes. Its final contract
-and completion evidence will be recorded in an independent phase report after
-the phase's validation and commit gates pass.
+Phase 1 tightens the creation envelope and replaces the early offset contract
+with cursor pagination. No external consumer or stable offset compatibility
+commitment was found. `offset` now returns 400.
 
 | Method | Path | Behavior |
 |---|---|---|
@@ -88,28 +87,70 @@ the phase's validation and commit gates pass.
 | GET | `/ready` | PostgreSQL, Redis and jobs schema ready: 200; otherwise 503 |
 | POST | `/api/v1/jobs` | Create a QUEUED job; 201 with Location header |
 | GET | `/api/v1/jobs/{id}` | Job by UUID; 404 if absent, 400 if malformed |
-| GET | `/api/v1/jobs?limit=20&offset=0` | Newest first by `(created_at, id)` descending |
+| GET | `/api/v1/jobs?limit=20&cursor=...` | Exclusive cursor pagination by `(created_at DESC, id DESC)` |
 
-Creation accepts `type` (1–128 characters after trimming), required `payload`
-(any JSON value, including JSON null), `priority` (0–100, default 0),
-`max_attempts` (1–100, default 3), `timeout` (**seconds**, 1–86400, default 300),
-and optional nonblank `idempotency_key` (up to 255 characters). PostgreSQL JSONB
-does not accept Unicode NUL/unpaired surrogate escapes; these return 400.
-Request bodies are capped at 1 MiB (413); malformed JSON, trailing documents
-and unknown fields return 400. State and execution metadata are server owned.
-The decoder follows Go's standard JSON behavior: duplicate object keys use the
-last value and field matching is case insensitive. Stricter decoding is Phase 1.
+| Create field | Missing | Explicit null | Supplied value |
+|---|---|---|---|
+| `type` | 400 | 400 | String; trim outer whitespace, retain inner content; 1–128 Unicode characters |
+| `payload` | 400 | Accepted as JSON null | Any JSON object, array, string, number or boolean |
+| `priority` | Default 0 | 400 | Integer 0–100 |
+| `max_attempts` | Default 3 | 400 | Integer 1–100 |
+| `timeout` | Default 300 | 400 | Integer 1–86400 **seconds** |
+| `idempotency_key` | No key | No key | Nonblank string, at most 255 Unicode characters; supplied whitespace is preserved |
+
+Only those exact lowercase field names are accepted. Unknown, wrong-case,
+duplicate top-level fields (including equivalent escaped key names), and
+server-owned fields return 400. Client-owned `id`, `status`, `result`,
+`attempt_count`, worker/lease fields or timestamps are not accepted.
+Numeric fields require JSON integer notation; strings, fractions and exponent
+notation are rejected. Empty/blank type or key values are rejected.
+
+Bodies are capped at 1 MiB before parsing, including requests without a declared
+length (413). Empty bodies, invalid UTF-8, malformed JSON and trailing JSON
+documents return 400. Unpaired surrogate escapes in metadata are rejected.
+PostgreSQL JSONB also rejects Unicode NUL, unpaired surrogates and numbers outside
+its numeric range; client payload failures return 400 without driver details.
+Nested payload duplicate keys retain JSONB's last-value semantics. Only the
+request envelope rejects duplicates; no recursive custom parser is introduced.
 
 `attempt_count` starts at 0. Unset result, worker, lease and execution timestamps
 serialize as null. Time strings are RFC3339 with optional fractional seconds in
 UTC. A stored idempotency key does **not** suppress duplicate submissions.
 Timeout and priority are stored metadata and are not enforced during execution.
-Pagination accepts limit 1–100, offset 0–1,000,000. Results are not a snapshot;
-concurrent inserts can shift offset pages. Empty results use `jobs: []`.
+POST returns persisted data from `INSERT ... RETURNING`; JSONB may normalize
+spacing, key order, numeric notation and nested duplicate keys. GET returns the
+same stored representation.
+
+List accepts only `limit` (default 20, range 1–100) and optional `cursor`.
+Unknown/repeated query parameters, invalid limits and malformed query encoding
+return 400. Its response is:
+
+```json
+{"jobs": [], "next_cursor": null}
+```
+
+When another page exists, `next_cursor` is a string representing the **last
+returned row**. Pass it unchanged to the next request:
+
+```sh
+curl 'http://localhost:8080/api/v1/jobs?limit=2'
+# Copy next_cursor from the response:
+curl 'http://localhost:8080/api/v1/jobs?limit=2&cursor=RETURNED_CURSOR'
+```
+
+The versioned, URL-safe cursor is bounded to 512 characters and validated; invalid
+cursors return 400. Final/empty pages return null, and empty jobs is always `[]`.
+Newer jobs inserted between pages do not shift the traversal of older rows.
+This is not a database snapshot: later inserts behind the boundary may appear.
+Cursors are unsigned boundaries, not authorization tokens. A structurally valid
+constructed cursor is accepted; clients must treat its encoding as opaque.
 
 Errors use `{"error":{"code":"JOB_NOT_FOUND","message":"job not found"}}`.
-Dependency failures during CRUD return a generic 500; raw driver errors and
-secrets are not sent to clients. Readiness failures return a generic 503.
+Codes distinguish `INVALID_JSON`, `INVALID_INPUT`, `INVALID_ID`, `INVALID_CURSOR`,
+`BODY_TOO_LARGE`, `JOB_NOT_FOUND` and `INTERNAL_ERROR`. Dependency failures,
+unexpected constraint failures and corrupt stored data return a generic 500;
+raw driver errors and secrets are not sent to clients. Readiness failures return
+a generic 503.
 
 ### Local Go development
 
@@ -124,9 +165,10 @@ Without a local Go installation, use the Linux tools container:
 docker compose --profile tools run --rm tools
 ```
 
-This executes formatting checks, vet, tests including real PostgreSQL integration,
-and build. Integration tests create and drop a random isolated schema. They do
-not delete application data. They require permission to create schemas.
+This executes formatting/state checks, vet, tests including real PostgreSQL
+integration, and build. Integration tests create and drop a random isolated
+schema, and verify `current_schema()` on every connection before test queries.
+They do not delete application data. They require permission to create schemas.
 Standalone `go test ./...` skips integration when neither
 `FLOWFORGE_TEST_POSTGRES_URL` nor `FLOWFORGE_INTEGRATION=1` is set. With the latter,
 normal application PostgreSQL configuration is used. CI supplies a dedicated
@@ -172,6 +214,12 @@ Phase 0 stores no application state there. All published ports bind to loopback.
 - Docker development environment, Makefile and CI workflow
 - Architecture, failure model, lifecycle, roadmap and ADR documentation
 - Machine-readable phase tracking, independent report template, and state validator
+- Exact Create field names, duplicate-envelope rejection and explicit null/default semantics
+- Deterministic cursor pagination with same-timestamp tie breaking and bounded cursor parsing
+- Canonical persisted create/read responses and corrupted-row rejection
+- Expanded HTTP/PostgreSQL contract, boundary and failure tests
+- Explicit single-statement CRUD transaction decision and cursor ADR
+- Manual/automation prompt-source tracking with strict protocol validation
 
 Redis infrastructure available.
 Redis-backed job queue is not implemented yet.
@@ -180,7 +228,7 @@ Job execution is not implemented yet.
 
 ### Experimental
 
-None. Phase 0 contains no experimental scheduler or execution implementation.
+None. There is no experimental scheduler or execution implementation.
 
 ### Planned
 
@@ -191,9 +239,10 @@ dashboard, metrics/tracing, failure injection, benchmarking and cloud deployment
 
 ## Roadmap
 
-The current work is **Phase 1 — Job Persistence + API Correctness**: tighten input
-semantics, expand database/API contract coverage, and decide pagination and
-transaction boundaries. See the [Phase 0–10 roadmap](docs/development-roadmap.md).
+Phase 1 delivers **Job Persistence + API Correctness**. The next recommended phase
+is **Phase 2 — Redis Queue + Single Worker Execution**, including an explicit
+solution for database/queue dual-write failure. Phase 2 is not implemented.
+See the [Phase 0–10 roadmap](docs/development-roadmap.md) and authoritative phase state.
 This repository does not claim exactly-once execution. Future delivery is planned
 as at-least-once; business side effects will need their own idempotency safeguards.
 
@@ -209,13 +258,22 @@ Keep reports from earlier phases.
 - [Phase reports](docs/reports/index.md): independent evidence and report index
 - [Report template](docs/phase-report-template.md): required report sections
 - [Automation protocol](docs/phase-automation.md): schema, completion gates, and handoff
-- `automation/prompts/`: next-phase prompts written by external Automation
+- `automation/prompts/`: phase prompts written by external Automation
 
 GitHub repository state is the shared automation source of truth. Automation
 reads `status`, `report`, `last_processed_phase`, and `next_prompt` from state,
 then reads the exact matching report. This README does not substitute for a
-phase report. Phase 1 is `in_progress`; no Phase 1 completion report or next
-prompt is claimed. The separate infrastructure report does not complete Phase 1.
+phase report. Completion is published only after tests, README, the independent
+phase report and real Git evidence pass their gates. The separate infrastructure
+report does not complete Phase 1.
+
+FlowForge supports both manual and automation-generated phase prompts. The
+current Phase 1 prompt is `manual`, with `prompt_path: null`; no manual prompt
+file is required. Automated prompts must have an existing current-phase file.
+`prompt_path` tracks the current phase's source; `next_prompt` tracks an externally
+prepared next phase. Both sources use the same completion gates. Explicit user
+instructions may supersede an unstarted automated prompt; Automation must not
+silently change a phase already in progress. Full rules are in the protocol.
 
 Validate with `go run ./scripts/validate-phase-state`; run focused tests with
 `go test -count=1 ./scripts/validate-phase-state` or the matching Make targets.

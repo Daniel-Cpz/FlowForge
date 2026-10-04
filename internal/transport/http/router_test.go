@@ -1,6 +1,7 @@
 package httptransport
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -40,14 +42,29 @@ func (m *memoryRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.Job, er
 	}
 	return nil, domain.ErrNotFound
 }
-func (m *memoryRepo) List(ctx context.Context, limit, offset int) ([]domain.Job, error) {
+func (m *memoryRepo) List(ctx context.Context, limit int, after *domain.PageCursor) ([]domain.Job, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
-	if offset >= len(m.jobs) {
-		return []domain.Job{}, nil
+	jobs := append([]domain.Job{}, m.jobs...)
+	sort.Slice(jobs, func(i, j int) bool {
+		if jobs[i].CreatedAt.Equal(jobs[j].CreatedAt) {
+			return bytes.Compare(jobs[i].ID[:], jobs[j].ID[:]) > 0
+		}
+		return jobs[i].CreatedAt.After(jobs[j].CreatedAt)
+	})
+	result := []domain.Job{}
+	for _, j := range jobs {
+		if after != nil && (j.CreatedAt.After(after.CreatedAt) ||
+			(j.CreatedAt.Equal(after.CreatedAt) && bytes.Compare(j.ID[:], after.ID[:]) >= 0)) {
+			continue
+		}
+		result = append(result, j)
+		if len(result) == limit {
+			break
+		}
 	}
-	return m.jobs[offset:min(offset+limit, len(m.jobs))], nil
+	return result, nil
 }
 func testLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 func request(h http.Handler, method, path, body string) *httptest.ResponseRecorder {
@@ -74,7 +91,7 @@ func TestJobHTTP(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatal(w.Code)
 	}
-	w = request(h, "GET", "/api/v1/jobs?limit=1&offset=0", "")
+	w = request(h, "GET", "/api/v1/jobs?limit=1", "")
 	if w.Code != 200 || !strings.Contains(w.Body.String(), j.ID.String()) {
 		t.Fatal(w.Code, w.Body.String())
 	}

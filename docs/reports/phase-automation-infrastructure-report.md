@@ -65,7 +65,7 @@ Existing business-code modifications are excluded from this task's commits.
 ## State Schema
 
 Version `1`, project `FlowForge`. Required fields:
-`schema_version`, `project`, `current_phase`, `status`, `report`, `next_prompt`,
+`schema_version`, `project`, `current_phase`, `status`, `prompt_source`, `prompt_path`, `report`, `next_prompt`,
 `last_processed_phase`, `branch`, `commit`, `tag`, `updated_at`.
 See [field semantics](../phase-automation.md).
 
@@ -214,3 +214,31 @@ Finish Phase 1 separately, write its independent phase report,
 synchronize the whole-project README, and update state only after its completion
 gates pass. External Automation then reviews that report before writing the
 Phase 2 prompt and advancing `last_processed_phase`.
+
+## Prompt Source Extension Follow-up
+
+The original results and Git publication above describe the infrastructure
+checkpoint. This explicit user-requested follow-up finalizes two required fields
+into schema version 1: `prompt_source` and `prompt_path`. No formal external
+consumer was found; the existing infrastructure, statuses, next-prompt role and
+processed counter are retained.
+
+Manual prompts use manual/null without requiring a prompt file. Automated prompts
+require the current phase's exact existing repository-confined regular file.
+`prompt_path` and `next_prompt` are independent. The protocol documents manual
+override, protection of in-progress scope and identical completion gates.
+
+Focused checks ran in the Linux tools container:
+
+- `go test -count=1 -v ./scripts/validate-phase-state`: PASS, original and new tests;
+  no skips. Includes manual/automation sources, missing/invalid fields, wrong-phase
+  paths, independent current/next prompts and symlink escape.
+- `go vet ./scripts/validate-phase-state`: PASS.
+- `go run ./scripts/validate-phase-state`: PASS for Phase 1 in_progress,
+  prompt_source manual, prompt_path null, completion fields null.
+
+At this extension checkpoint Phase 1 completion is NOT CLAIMED. Completion of
+the original Phase 1 business scope is tracked separately in its numbered phase
+report and authoritative state. The infrastructure snapshot above is historical;
+it does not override later state. No automated Phase 2 prompt or external review
+is claimed by this follow-up.

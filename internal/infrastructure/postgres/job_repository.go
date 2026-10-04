@@ -22,20 +22,26 @@ const columns = `id, type, status, priority, payload, result, attempt_count, max
  timeout, idempotency_key, assigned_worker, lease_expiry, created_at, started_at, finished_at`
 
 func (r *JobRepository) Create(ctx context.Context, j *job.Job) error {
+	if err := j.Validate(); err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	_, err := r.pool.Exec(ctx, `INSERT INTO jobs (`+columns+`) VALUES
-	 ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+	// A single INSERT ... RETURNING is atomic without an explicit transaction.
+	stored, err := scanJob(r.pool.QueryRow(ctx, `INSERT INTO jobs (`+columns+`) VALUES
+	 ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING `+columns,
 		j.ID, j.Type, j.Status, j.Priority, j.Payload, j.Result, j.AttemptCount, j.MaxAttempts,
-		j.Timeout, j.IdempotencyKey, j.AssignedWorker, j.LeaseExpiry, j.CreatedAt, j.StartedAt, j.FinishedAt)
+		j.Timeout, j.IdempotencyKey, j.AssignedWorker, j.LeaseExpiry, j.CreatedAt, j.StartedAt, j.FinishedAt))
 	if err != nil {
-		// PostgreSQL JSONB cannot represent Unicode NUL or unpaired surrogates.
+		// JSONB rejects Unicode NUL, unpaired surrogates and numeric overflow.
+		// All non-JSON values have already passed domain bounds validation.
 		var pgErr interface{ SQLState() string }
-		if errors.As(err, &pgErr) && (pgErr.SQLState() == "22P02" || pgErr.SQLState() == "22P05") {
+		if errors.As(err, &pgErr) && (pgErr.SQLState() == "22P02" || pgErr.SQLState() == "22P05" || pgErr.SQLState() == "22003") {
 			return job.ErrInvalidInput
 		}
 		return fmt.Errorf("create job: %w", err)
 	}
+	*j = *stored
 	return nil
 }
 
@@ -55,6 +61,9 @@ func scanJob(row pgx.Row) (*job.Job, error) {
 			*t = t.UTC()
 		}
 	}
+	if err := j.Validate(); err != nil {
+		return nil, job.ErrInvalidStoredData
+	}
 	return &j, nil
 }
 
@@ -64,10 +73,20 @@ func (r *JobRepository) GetByID(ctx context.Context, id uuid.UUID) (*job.Job, er
 	return scanJob(r.pool.QueryRow(ctx, `SELECT `+columns+` FROM jobs WHERE id=$1`, id))
 }
 
-func (r *JobRepository) List(ctx context.Context, limit, offset int) ([]job.Job, error) {
+func (r *JobRepository) List(ctx context.Context, limit int, after *job.PageCursor) ([]job.Job, error) {
+	// Service requests up to 100 + one lookahead row. Bound direct callers too.
+	if limit < 1 || limit > 101 || (after != nil && !after.Valid()) {
+		return nil, job.ErrInvalidInput
+	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	rows, err := r.pool.Query(ctx, `SELECT `+columns+` FROM jobs ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2`, limit, offset)
+	query := `SELECT ` + columns + ` FROM jobs ORDER BY created_at DESC, id DESC LIMIT $1`
+	args := []any{limit}
+	if after != nil {
+		query = `SELECT ` + columns + ` FROM jobs WHERE (created_at, id) < ($2, $3) ORDER BY created_at DESC, id DESC LIMIT $1`
+		args = append(args, after.CreatedAt, after.ID)
+	}
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list jobs: %w", err)
 	}
@@ -80,5 +99,8 @@ func (r *JobRepository) List(ctx context.Context, limit, offset int) ([]job.Job,
 		}
 		jobs = append(jobs, *j)
 	}
-	return jobs, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate jobs: %w", err)
+	}
+	return jobs, nil
 }

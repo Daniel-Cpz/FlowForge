@@ -24,10 +24,12 @@ unknown fields, duplicate keys, wrong-case keys, and trailing JSON are rejected.
 
 | Field | Meaning |
 |---|---|
-| `schema_version` | Integer `1`; change the version deliberately when changing this contract |
+| `schema_version` | Integer `1`; prompt-source fields are finalized into v1 before any formal external consumer is present |
 | `project` | Exactly `FlowForge` |
 | `current_phase` | Positive integer for the current or just-completed phase; tracking starts at Phase 1 |
 | `status` | Exactly `not_started`, `in_progress`, `completed`, or `blocked` |
+| `prompt_source` | Required string, exactly `manual` or `automation`, identifying the current phase's prompt |
+| `prompt_path` | Null for manual; for automation exactly `automation/prompts/phase-N.md` matching `current_phase`, an existing confined regular file |
 | `report` | Null until completion; then exactly `docs/reports/phase-N-report.md` for `current_phase` |
 | `next_prompt` | Null or exactly `automation/prompts/phase-(N+1).md`, an existing file written by external Automation |
 | `last_processed_phase` | Integer from 0 through `current_phase`; external Automation advances it after reviewing the phase and creating the next prompt |
@@ -42,6 +44,37 @@ A non-null `next_prompt` requires `completed` and
 `last_processed_phase == current_phase`. Null is always valid.
 Codex must not advance `last_processed_phase` to claim external review or invent
 a next prompt.
+
+## Prompt Source
+
+Both manual and automation-generated phase prompts are valid and use identical
+implementation, testing, README, report, Git and state gates. A manual prompt
+provided directly by the user sets `prompt_source: "manual"`, `prompt_path: null`.
+There is no required archived prompt file. An automated prompt sets
+`prompt_source: "automation"` and records an existing current-phase file, such as
+`automation/prompts/phase-3.md` when `current_phase` is 3. The validator applies
+the existing repository confinement and regular-file checks, including symlink
+escape rejection. Required source enums do not accept aliases or null; even
+`not_started` represents a phase with its source already selected in this v1.
+
+`prompt_path` explains where the current phase originated. `next_prompt` remains
+the externally prepared **next** phase's prompt and follows its existing rules.
+Neither is inferred from `last_processed_phase`, which records external review
+only. Manual phases do not require that review to select a prompt or start work.
+
+If an unstarted automated prompt exists and the user supplies explicit manual
+instructions, keep the old file as history, set manual/null, and record in the
+phase report: "Automated prompt existed but was superseded by explicit user
+instructions." Do not silently combine conflicting prompts. Once a phase is
+`in_progress`, newly generated automated text must not change its scope. Only an
+explicit user scope change may do so, and the report records it. This is a
+consumer obligation; this repository provides no external automation runner.
+
+An explicit manual start can replace an unperformed automatic handoff. External
+Automation processes only the **current completed** state; after the user has
+entered the next phase it must not generate a late prompt for that already
+started phase, roll back current_phase or rewrite its source. Use an expected
+revision check when publishing transitions, not just the processed counter.
 
 ## Completion gates and safe write order
 
@@ -81,8 +114,11 @@ lock. Re-reading an already processed phase generates no new prompt.
 
 When an authorized next phase starts, set `current_phase` to N+1, set
 `status` to `in_progress`, clear `report`, `commit`, `tag`, and `next_prompt`,
-set the actual branch, and retain `last_processed_phase`. Keep historical reports
-and prompts. This task adds the contract, not a scheduler or cross-chat workflow.
+set the actual branch, and retain `last_processed_phase`. When claiming the
+automated next prompt, its old `next_prompt` becomes the new `prompt_path`, with
+`prompt_source: "automation"`. When the user directly starts it, use manual/null;
+an automated file need not exist. Keep historical reports and prompts. The
+protocol adds no scheduler or cross-chat workflow.
 
 ## Validation
 
@@ -109,6 +145,6 @@ tools image can run focused checks without application services:
 docker run --rm --mount "type=bind,source=$($PWD.Path),target=/src,readonly" -w /src -e GOTOOLCHAIN=local -e GOFLAGS=-mod=readonly flowforge-tools sh -c 'git config --global --add safe.directory /src && go test -count=1 ./scripts/validate-phase-state && go run ./scripts/validate-phase-state'
 ```
 
-Phase 1 remains in progress. Its existing implementation edits need their own
-review, tests, commit, and report before phase completion. This infrastructure
-report does not certify Phase 1 completion or retrospectively certify Phase 0.
+The current Phase 1 source is manual with null prompt_path. Its independent
+report and machine-readable state certify completion only after all gates pass.
+The infrastructure report alone does not certify a numbered phase or Phase 0.

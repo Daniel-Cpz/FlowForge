@@ -28,6 +28,11 @@ COMPLETED
 ## Summary
 What this phase delivers and its acceptance criteria.
 
+## Prompt Source
+Prompt Source: manual or automation
+Prompt Path: null for manual, otherwise automation/prompts/phase-N.md
+Record explicit user scope changes or an automated prompt superseded by manual instructions.
+
 ## Implemented
 - Verified capabilities delivered by this phase.
 

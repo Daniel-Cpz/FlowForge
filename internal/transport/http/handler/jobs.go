@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -22,9 +23,17 @@ type Jobs struct {
 func NewJobs(s *service.Service, logger *slog.Logger) *Jobs { return &Jobs{service: s, logger: logger} }
 
 func writeJSON(w http.ResponseWriter, status int, data any) {
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		slog.Error("response encoding failed", "event", "response_encoding_failed")
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error")
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(data)
+	if _, err := w.Write(append(encoded, '\n')); err != nil {
+		slog.Debug("response write failed", "event", "response_write_failed")
+	}
 }
 
 func writeError(w http.ResponseWriter, status int, code, message string) {
@@ -47,23 +56,18 @@ func (h *Jobs) fail(w http.ResponseWriter, r *http.Request, err error) {
 func (h *Jobs) Create(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	defer r.Body.Close()
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-	var in *service.CreateInput
-	if err := decoder.Decode(&in); err != nil {
+	// MaxBytesReader bounds allocations even when Content-Length is absent.
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
 		h.decodeError(w, err)
 		return
 	}
-	if in == nil {
-		writeError(w, 400, "INVALID_JSON", "expected a JSON object")
-		return
-	}
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
+	in, err := decodeCreateInput(body)
+	if err != nil {
 		h.decodeError(w, err)
 		return
 	}
-	j, err := h.service.Create(r.Context(), *in)
+	j, err := h.service.Create(r.Context(), in)
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -78,7 +82,7 @@ func (h *Jobs) decodeError(w http.ResponseWriter, err error) {
 		writeError(w, 413, "BODY_TOO_LARGE", "request body exceeds 1 MiB")
 		return
 	}
-	writeError(w, 400, "INVALID_JSON", "expected one valid JSON object with known fields")
+	writeError(w, 400, "INVALID_JSON", "expected one valid JSON object with exact, unique fields")
 }
 
 func (h *Jobs) Get(w http.ResponseWriter, r *http.Request) {
@@ -96,10 +100,18 @@ func (h *Jobs) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Jobs) List(w http.ResponseWriter, r *http.Request) {
-	limit, offset := 20, 0
-	query, err := r.URL.Query(), error(nil)
+	limit := 20
+	query, err := url.ParseQuery(r.URL.RawQuery)
+	if err != nil {
+		writeError(w, 400, "INVALID_INPUT", "invalid pagination")
+		return
+	}
 	for key, values := range query {
-		if (key != "limit" && key != "offset") || len(values) != 1 || strings.TrimSpace(values[0]) == "" {
+		if key == "cursor" && (len(values) != 1 || values[0] == "" || len(values[0]) > maxCursorLength) {
+			writeError(w, 400, "INVALID_CURSOR", "invalid cursor")
+			return
+		}
+		if (key != "limit" && key != "cursor") || len(values) != 1 || strings.TrimSpace(values[0]) == "" {
 			writeError(w, 400, "INVALID_INPUT", "invalid pagination")
 			return
 		}
@@ -107,19 +119,36 @@ func (h *Jobs) List(w http.ResponseWriter, r *http.Request) {
 	if query.Has("limit") {
 		limit, err = strconv.Atoi(query.Get("limit"))
 	}
-	if err == nil && query.Has("offset") {
-		offset, err = strconv.Atoi(query.Get("offset"))
-	}
 	if err != nil {
 		writeError(w, 400, "INVALID_INPUT", "invalid pagination")
 		return
 	}
-	jobs, err := h.service.List(r.Context(), limit, offset)
+	var after *domain.PageCursor
+	if query.Has("cursor") {
+		after, err = decodeCursor(query.Get("cursor"))
+		if err != nil {
+			writeError(w, 400, "INVALID_CURSOR", "invalid cursor")
+			return
+		}
+	}
+	page, err := h.service.List(r.Context(), limit, after)
 	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
-	writeJSON(w, 200, map[string]any{"jobs": jobs, "limit": limit, "offset": offset})
+	var next *string
+	if page.NextCursor != nil {
+		encoded, err := encodeCursor(*page.NextCursor)
+		if err != nil {
+			h.fail(w, r, err)
+			return
+		}
+		next = &encoded
+	}
+	writeJSON(w, 200, struct {
+		Jobs       []domain.Job `json:"jobs"`
+		NextCursor *string      `json:"next_cursor"`
+	}{Jobs: page.Jobs, NextCursor: next})
 }
 
 // RoutingError keeps unknown routes and unsupported methods in the same envelope.

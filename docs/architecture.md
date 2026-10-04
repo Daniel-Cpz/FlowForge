@@ -1,6 +1,6 @@
 # Architecture
 
-Status: Phase 0 implemented; execution design below is Planned.
+Status: Phase 0 foundation and Phase 1 API/persistence implemented; execution is Planned.
 
 ## Boundaries
 
@@ -61,7 +61,7 @@ state transition graph; direct SQL is not a supported state transition API.
 ## Delivery semantics — Planned
 
 The future target is **at-least-once delivery**, with duplicate execution possible.
-Phase 0 provides persistence only and no message delivery guarantee.
+The current implementation provides persistence only and no message delivery guarantee.
 
 Message delivery and a business side effect are different events. A worker can
 perform an external side effect, then crash before recording success. Delivering
@@ -99,6 +99,37 @@ retry after timeout requires a later explicit policy and state graph revision.
 Local development only: no authentication, TLS termination, rate limiting,
 multi-tenancy, production secret manager, metrics, tracing or benchmarks.
 Pool maximum is ten connections per process. PostgreSQL statement timeout is
-five seconds. List is bounded offset pagination, not snapshot or cursor based.
+five seconds. List uses bounded keyset pagination; it does not hold a snapshot
+transaction across HTTP requests.
 Production environment config requires PostgreSQL TLS, but that check alone does
 not make this a production-ready system. Redis TLS is not implemented.
+
+## Persistence and transaction boundaries
+
+Create is one parameterized `INSERT ... RETURNING`; Get and List are each one
+parameterized SELECT. Each statement has its own atomic boundary; an explicit
+transaction adds no shared-work guarantee to these current use cases. Migrations
+keep their existing explicit transaction because they change schema and version
+history together. Future job/attempt/queue coordination needs a separate design.
+
+Create returns the database's JSONB representation and timestamp precision, so
+POST and GET agree. Domain value validation is shared by the service and the
+repository read/write boundary. Important numeric/status constraints remain in
+PostgreSQL. Invalid stored status, identifiers or timestamps produce an internal
+failure rather than a fabricated valid job. State-transition rules remain only
+in the centralized domain graph; no trigger duplicates that graph.
+
+HTTP owns exact field names, duplicate-envelope detection and cursor encoding.
+Service owns creation defaults and page lookahead. Domain exposes a typed
+`PageCursor` containing a UTC microsecond timestamp and UUID; repository never
+receives a base64 string. List orders by `(created_at DESC, id DESC)` and applies
+the exclusive tuple condition `(created_at, id) < ($cursor_time, $cursor_id)`.
+The existing `jobs_created_at_id_idx` matches this order and boundary, so Phase 1
+needs no new index or migration. No throughput or planner-performance claim is made.
+
+The service requests limit+1 rows, returns at most limit, and constructs the next
+boundary from the last returned row when a lookahead exists. Newer inserts cannot
+shift older pages. This is not snapshot isolation across requests; backdated
+inserts behind a boundary may appear. Phase 1 removes offset without maintaining
+a second pagination mode; no existing external compatibility commitment was found.
+See [ADR 0002](decisions/0002-phase-1-api-contract.md).

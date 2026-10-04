@@ -13,7 +13,7 @@ func ptr(s string) *string { return &s }
 
 func pendingState() State {
 	return State{SchemaVersion: 1, Project: "FlowForge", CurrentPhase: 1,
-		Status: "in_progress", Branch: ptr("codex/phase1-api-correctness"),
+		Status: "in_progress", PromptSource: "manual", Branch: ptr("codex/phase1-api-correctness"),
 		UpdatedAt: ptr("2026-10-04T17:07:09Z")}
 }
 
@@ -144,6 +144,13 @@ func TestDecodeState(t *testing.T) {
 		{"trailing document", valid + "{}"},
 		{"malformed JSON", valid[:len(valid)-1]},
 		{"array", "[]"},
+		{"missing prompt source", strings.Replace(valid, `"prompt_source":"manual",`, "", 1)},
+		{"missing prompt path", strings.Replace(valid, `"prompt_path":null,`, "", 1)},
+		{"null prompt source", strings.Replace(valid, `"prompt_source":"manual"`, `"prompt_source":null`, 1)},
+		{"wrong source type", strings.Replace(valid, `"prompt_source":"manual"`, `"prompt_source":42`, 1)},
+		{"wrong path type", strings.Replace(valid, `"prompt_path":null`, `"prompt_path":42`, 1)},
+		{"wrong source case", strings.Replace(valid, `"prompt_source":`, `"Prompt_source":`, 1)},
+		{"duplicate source", strings.Replace(valid, `"prompt_source":"manual"`, `"prompt_source":"manual","prompt_source":"automation"`, 1)},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -156,6 +163,99 @@ func TestDecodeState(t *testing.T) {
 	writeFixture(t, root, "automation/state.json", valid)
 	if err := validateFile(root, "automation/state.json"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPromptSources(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "automation/prompts/phase-3.md", "# Phase 3 prompt fixture\n")
+	for _, tc := range []struct {
+		name   string
+		source string
+		path   *string
+		phase  int
+		valid  bool
+	}{
+		{"manual without file", "manual", nil, 3, true},
+		{"manual with path", "manual", ptr("automation/prompts/phase-3.md"), 3, false},
+		{"automation without path", "automation", nil, 3, false},
+		{"automation existing current path", "automation", ptr("automation/prompts/phase-3.md"), 3, true},
+		{"automation missing file", "automation", ptr("automation/prompts/phase-2.md"), 2, false},
+		{"automation previous phase", "automation", ptr("automation/prompts/phase-2.md"), 3, false},
+		{"automation next phase", "automation", ptr("automation/prompts/phase-4.md"), 3, false},
+		{"unsupported source", "auto", nil, 3, false},
+		{"missing source", "", nil, 3, false},
+		{"escape path", "automation", ptr("../outside.md"), 3, false},
+		{"absolute path", "automation", ptr("/tmp/phase-3.md"), 3, false},
+		{"Windows drive", "automation", ptr("C:/phase-3.md"), 3, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := pendingState()
+			s.CurrentPhase, s.PromptSource, s.PromptPath = tc.phase, tc.source, tc.path
+			// Source selection does not imply the phase was externally processed.
+			s.LastProcessedPhase = 0
+			if err := validate(root, s); (err == nil) != tc.valid {
+				t.Fatalf("valid=%v, got %v", tc.valid, err)
+			}
+		})
+	}
+	for _, status := range []string{"not_started", "in_progress", "blocked"} {
+		s := pendingState()
+		s.Status = status
+		if err := validate(root, s); err != nil {
+			t.Fatal(err)
+		}
+		s.PromptSource = ""
+		if err := validate(root, s); err == nil {
+			t.Fatal("source required in", status)
+		}
+	}
+}
+
+func TestCurrentPromptAndNextPromptAreIndependent(t *testing.T) {
+	root, s := fixture(t)
+	writeFixture(t, root, "docs/reports/phase-3-report.md", strings.ReplaceAll(reportFixture(), "Phase 1", "Phase 3"))
+	if _, err := git(root, "add", "docs/reports/phase-3-report.md"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git(root, "-c", "commit.gpgsign=false", "commit", "-m", "phase 3 fixture"); err != nil {
+		t.Fatal(err)
+	}
+	sha, err := git(root, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, root, "automation/prompts/phase-3.md", "# Current phase fixture\n")
+	writeFixture(t, root, "automation/prompts/phase-4.md", "# Next phase fixture\n")
+	s.CurrentPhase, s.LastProcessedPhase = 3, 3
+	s.Commit, s.Report = ptr(sha), ptr("docs/reports/phase-3-report.md")
+	s.PromptSource, s.PromptPath = "automation", ptr("automation/prompts/phase-3.md")
+	s.NextPrompt = ptr("automation/prompts/phase-4.md")
+	if err := validate(root, s); err != nil {
+		t.Fatal(err)
+	}
+	s.NextPrompt = s.PromptPath
+	if err := validate(root, s); err == nil {
+		t.Fatal("current path accepted as next prompt")
+	}
+	s.NextPrompt, s.PromptPath = ptr("automation/prompts/phase-4.md"), ptr("automation/prompts/phase-4.md")
+	if err := validate(root, s); err == nil {
+		t.Fatal("next path accepted as current prompt")
+	}
+}
+
+func TestPromptPathConfinement(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	writeFixture(t, root, "automation/prompts/placeholder", "fixture")
+	writeFixture(t, outside, "prompt.md", "# External fixture\n")
+	path := filepath.Join(root, "automation", "prompts", "phase-1.md")
+	if err := os.Symlink(filepath.Join(outside, "prompt.md"), path); err != nil {
+		t.Skipf("symlink creation unavailable: %v", err)
+	}
+	s := pendingState()
+	s.PromptSource, s.PromptPath = "automation", ptr("automation/prompts/phase-1.md")
+	if err := validate(root, s); err == nil || !strings.Contains(err.Error(), "escapes repository") {
+		t.Fatal("prompt symlink escape accepted", err)
 	}
 }
 

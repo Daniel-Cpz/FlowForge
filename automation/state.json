@@ -9,5 +9,7 @@
   "branch": "codex/phase1-api-correctness",
   "commit": null,
   "tag": null,
-  "updated_at": "2026-10-04T17:13:44Z"
+  "updated_at": "2026-10-04T17:30:16Z",
+  "prompt_source": "manual",
+  "prompt_path": null
 }

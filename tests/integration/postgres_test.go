@@ -15,6 +15,7 @@ import (
 	service "github.com/Daniel-Cpz/FlowForge/internal/service/job"
 	"github.com/Daniel-Cpz/FlowForge/migrations"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -37,8 +38,8 @@ func database(t *testing.T) *pgxpool.Pool {
 	if err != nil {
 		t.Fatal("test database unavailable")
 	}
-	schema := "test_" + uuid.New().String()
-	schema = "\"" + schema + "\""
+	schemaName := "test_" + uuid.New().String()
+	schema := pgx.Identifier{schemaName}.Sanitize()
 	if _, err = admin.Exec(ctx, `CREATE SCHEMA `+schema); err != nil {
 		admin.Close()
 		t.Fatal(err)
@@ -57,11 +58,26 @@ func database(t *testing.T) *pgxpool.Pool {
 	cfg.ConnConfig.RuntimeParams["search_path"] = schema
 	cfg.ConnConfig.RuntimeParams["timezone"] = "UTC"
 	cfg.ConnConfig.RuntimeParams["statement_timeout"] = "5000"
+	// Verify every connection before any test query can execute. There is no
+	// public-schema fallback, including after a connection is replaced.
+	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		var actual string
+		if err := conn.QueryRow(ctx, `SELECT current_schema()`).Scan(&actual); err != nil {
+			return err
+		}
+		if actual != schemaName {
+			return errors.New("integration schema isolation check failed")
+		}
+		return nil
+	}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
+	if err := pool.Ping(ctx); err != nil {
+		t.Fatal("isolated integration pool unavailable", err)
+	}
 	return pool
 }
 
@@ -101,9 +117,12 @@ func TestPersistenceAndMigrations(t *testing.T) {
 	if _, err = s.Create(ctx, service.CreateInput{Type: "example", Payload: json.RawMessage(`null`), IdempotencyKey: &key}); err != nil {
 		t.Fatal("idempotency must not be enforced", err)
 	}
-	list, err := s.List(ctx, 20, 0)
-	if err != nil || len(list) != 2 {
-		t.Fatal("list", len(list), err)
+	page, err := s.List(ctx, 20, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Jobs) != 2 || page.NextCursor != nil {
+		t.Fatal("list", page)
 	}
 	if _, err = repo.GetByID(ctx, uuid.New()); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatal("not found mapping", err)
