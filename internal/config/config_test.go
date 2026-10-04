@@ -40,6 +40,7 @@ func TestInvalidConfig(t *testing.T) {
 		{"FLOWFORGE_POSTGRES_HOST", ""}, {"FLOWFORGE_REDIS_DB", "-1"}, {"FLOWFORGE_REDIS_DB", "16"},
 		{"FLOWFORGE_HTTP_ADDR", "bad"}, {"FLOWFORGE_REDIS_ADDR", "localhost:0"}, {"FLOWFORGE_LOG_LEVEL", "nope"},
 		{"FLOWFORGE_ENV", "invalid"}, {"FLOWFORGE_ENV", "production"}, {"FLOWFORGE_POSTGRES_SSLMODE", "nonsense"},
+		{"FLOWFORGE_REDIS_STREAM", ""}, {"FLOWFORGE_REDIS_STREAM", "\n"}, {"FLOWFORGE_REDIS_STREAM", strings.Repeat("a", 257)},
 	} {
 		t.Run(tc.key+tc.value, func(t *testing.T) {
 			defaults(t)

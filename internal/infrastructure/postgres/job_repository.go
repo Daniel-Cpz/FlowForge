@@ -27,8 +27,12 @@ func (r *JobRepository) Create(ctx context.Context, j *job.Job) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	// A single INSERT ... RETURNING is atomic without an explicit transaction.
-	stored, err := scanJob(r.pool.QueryRow(ctx, `INSERT INTO jobs (`+columns+`) VALUES
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin create: %w", err)
+	}
+	defer rollback(tx)
+	stored, err := scanJob(tx.QueryRow(ctx, `INSERT INTO jobs (`+columns+`) VALUES
 	 ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING `+columns,
 		j.ID, j.Type, j.Status, j.Priority, j.Payload, j.Result, j.AttemptCount, j.MaxAttempts,
 		j.Timeout, j.IdempotencyKey, j.AssignedWorker, j.LeaseExpiry, j.CreatedAt, j.StartedAt, j.FinishedAt))
@@ -41,8 +45,20 @@ func (r *JobRepository) Create(ctx context.Context, j *job.Job) error {
 		}
 		return fmt.Errorf("create job: %w", err)
 	}
+	if _, err := tx.Exec(ctx, `INSERT INTO job_dispatch(job_id) VALUES($1)`, j.ID); err != nil {
+		return fmt.Errorf("create dispatch intent: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit create: %w", err)
+	}
 	*j = *stored
 	return nil
+}
+
+func rollback(tx pgx.Tx) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = tx.Rollback(ctx)
 }
 
 func scanJob(row pgx.Row) (*job.Job, error) {

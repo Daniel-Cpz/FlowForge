@@ -18,7 +18,7 @@ func CanTransition(from, to Status) bool {
 }
 
 // Transition validates the state graph only. Execution metadata and persistence
-// must be coordinated atomically by future execution use cases.
+// are coordinated atomically by repository claim/finalize use cases.
 func (j *Job) Transition(to Status) error {
 	if !CanTransition(j.Status, to) {
 		return fmt.Errorf("%w: %s -> %s", ErrInvalidTransition, j.Status, to)

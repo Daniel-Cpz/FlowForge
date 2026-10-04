@@ -1,6 +1,6 @@
 # Architecture
 
-Status: Phase 0 foundation and Phase 1 API/persistence implemented; execution is Planned.
+Status: Phase 0 foundation, Phase 1 API/persistence and Phase 2 single-worker execution implemented.
 
 ## Boundaries
 
@@ -11,18 +11,18 @@ which depends on domain models and a domain-owned Repository interface.
 `infrastructure/postgres` implements that interface. Infrastructure depends
 inward on domain; domain does not depend on SQL, Redis or HTTP.
 
-Only Create, GetByID and List exist because these are the current use cases.
-There is no update API or worker repository/service: without a worker use case
-they would be empty abstractions. Job state transitions are centralized in domain.
-Future persistence transitions must atomically verify expected state and lease
-ownership; calling the pure in-memory transition function alone is not sufficient.
+HTTP exposes Create, GetByID and List. Dispatcher and worker services define
+narrow infrastructure interfaces for their actual use cases, implemented by
+PostgreSQL and Redis adapters. Job transitions remain centralized in domain.
+Claim/finalize use atomic SQL predicates; calling a pure in-memory transition
+alone would not establish durable execution ownership. No update HTTP API exists.
 
 ## Components and source of truth
 
 - API: bounded HTTP input, service validation, persistence, health/readiness.
-- Worker: dependency connection and graceful process lifecycle only.
-- PostgreSQL: sole durable truth for jobs and future execution records.
-- Redis: connectivity and readiness only; no queue, consumer or durable job state.
+- Worker process: one dispatcher goroutine plus one serial executor; no pool.
+- PostgreSQL: sole durable truth for jobs, attempts and dispatch intent.
+- Redis: Streams delivery with consumer group and explicit ACK, never payload authority.
 - Migrations: separate command; version table + advisory transaction lock ensure
   repeated startup and concurrent migrators cannot apply a version twice.
 
@@ -32,47 +32,67 @@ image's versioned data layout ([Docker documentation](https://docs.docker.com/gu
 ## Failure model
 
 Missing/invalid configuration exits nonzero without dumping configuration.
-PostgreSQL and Redis must respond within the bounded startup context or the
-process exits. If Redis fails after PostgreSQL opened, PostgreSQL is closed.
+PostgreSQL must respond within the bounded startup context or the process exits.
+Redis connectivity is checked by API readiness and retried by the worker.
 Driver errors are not logged verbatim because they can contain connection or
 payload details. Operational logs classify failures; richer safe diagnostics
 remain future work.
 Logs use structured JSON and UTC timestamps. `event` identifies lifecycle or
-failure events. Future execution logs will add `job_id`, `worker_id`, `attempt`
-and `trace_id` when those contexts exist; Phase 0 does not fabricate those values.
+failure events; persisted executions log `job_id` and status. No trace context is fabricated.
 
 Liveness checks do not query dependencies. Readiness checks both dependencies
-and the jobs columns used by the API, within a two-second context. CRUD uses
+and the jobs/outbox columns used by the API, within a two-second context. CRUD uses
 request context plus a five-second database timeout. A database outage returns
 generic 500; a Redis outage makes readiness fail but does not prevent a directly
-addressed persistence request from succeeding. Redis stores no job state.
+addressed creation request from atomically committing Job and dispatch intent.
 
 On SIGINT/SIGTERM, API stops accepting connections and allows ten seconds for
 in-flight requests, then force-closes remaining connections if necessary.
-Worker stops waiting and closes clients. Compose grants fifteen seconds.
-Neither process retries startup indefinitely. Restart policies and production
-orchestration are outside this phase.
+Worker cancels its context-aware SLEEP, tries to persist FAILED with
+`execution_cancelled` and ACK within a five-second cleanup context, stops the
+dispatcher and closes clients. Compose grants fifteen seconds. Redis receive
+errors wait 250 ms between attempts; dispatch cycles wait one second even after
+failure or a full batch. Restart policies and production orchestration remain planned.
 
 Creation persists before returning 201. If the DB commit succeeds but the client
 loses the response, resubmitting may create another job. There is no submission
 idempotency guarantee. PostgreSQL constraints validate values, not the full
 state transition graph; direct SQL is not a supported state transition API.
 
-## Delivery semantics — Planned
+## Delivery semantics — Phase 2
 
-The future target is **at-least-once delivery**, with duplicate execution possible.
-The current implementation provides persistence only and no message delivery guarantee.
+Delivery is **at-least-once**, backed by PostgreSQL dispatch intent. Create
+commits Job + outbox in one transaction. The dispatcher queries at most 100 rows
+per cycle, XADDs version `1` and Job ID, then marks publication. Failed publish
+retains pending intent; a lost marker response allows duplicate publication.
+Still-QUEUED Jobs are republished after 30 seconds even when marked published,
+so lost Redis data or a lost pre-claim pending delivery is reconstructible.
+This is notification reconciliation, not RUNNING recovery or stale-owner reclaim.
+
+Streams use `XGROUP CREATE ... 0 MKSTREAM`, `XREADGROUP ... > COUNT 1 BLOCK 500`
+and `XACK`, retaining consumer-group pending entries until explicit ACK.
+Messages reference authoritative PostgreSQL data. A worker reloads the Job,
+then conditionally claims QUEUED -> RUNNING and inserts one attempt in a single
+transaction. Finalization conditionally matches RUNNING, worker and attempt,
+updating both Job and attempt atomically before ACK. Missing/malformed messages
+and non-QUEUED duplicates are ACKed without execution. A pre-claim infrastructure
+error retains the current message for bounded local retry; a post-claim
+finalize/ACK failure stops the worker with a sanitized error.
+
+An abrupt crash or uncertain database response after successful claim can leave
+RUNNING indefinitely; pending entries of old consumers are not reclaimed. The
+current guard prevents duplicate execution from a second claim, but provides
+no exactly-once business-side-effect guarantee. Phase 4 must address recovery.
 
 Message delivery and a business side effect are different events. A worker can
 perform an external side effect, then crash before recording success. Delivering
 the job again cannot prove that the external action did not happen. A local
 transaction cannot make an arbitrary external API exactly-once.
 
-Planned safeguards include scoped idempotency keys, duplicate detection,
-execution records, safe state transitions and side-effect-specific deduplication.
+Planned safeguards include scoped submission idempotency and side-effect-specific deduplication.
 Scope and retention are not decided, so idempotency_key has no global permanent
-unique constraint. A future Redis notification must be reconstructible from
-PostgreSQL; the database/queue dual-write gap needs an explicit design in Phase 2.
+unique constraint. See [ADR 0003](decisions/0003-durable-dispatch-and-single-worker.md)
+for the current database/queue handoff and future extension boundaries.
 
 ## Lease and recovery — Planned
 
@@ -106,11 +126,13 @@ not make this a production-ready system. Redis TLS is not implemented.
 
 ## Persistence and transaction boundaries
 
-Create is one parameterized `INSERT ... RETURNING`; Get and List are each one
-parameterized SELECT. Each statement has its own atomic boundary; an explicit
-transaction adds no shared-work guarantee to these current use cases. Migrations
-keep their existing explicit transaction because they change schema and version
-history together. Future job/attempt/queue coordination needs a separate design.
+Phase 2 supersedes ADR 0002's single-statement Create boundary: parameterized
+`INSERT ... RETURNING` + outbox insert + commit now form one explicit transaction.
+Get/List remain single-statement reads. Claim/attempt creation and terminal
+Job/attempt finalization each have their own transaction. No database transaction
+is held across Redis I/O or SLEEP. Rollback uses an independent five-second
+cleanup context; requests and database operations retain bounded deadlines.
+Migrations keep their schema/version transaction, adding only version 000003.
 
 Create returns the database's JSONB representation and timestamp precision, so
 POST and GET agree. Domain value validation is shared by the service and the
@@ -124,8 +146,9 @@ Service owns creation defaults and page lookahead. Domain exposes a typed
 `PageCursor` containing a UTC microsecond timestamp and UUID; repository never
 receives a base64 string. List orders by `(created_at DESC, id DESC)` and applies
 the exclusive tuple condition `(created_at, id) < ($cursor_time, $cursor_id)`.
-The existing `jobs_created_at_id_idx` matches this order and boundary, so Phase 1
-needs no new index or migration. No throughput or planner-performance claim is made.
+The existing `jobs_created_at_id_idx` matches this order and boundary; Phase 2
+adds an outbox publication index, without changing historical migrations.
+No throughput or planner-performance claim is made.
 
 The service requests limit+1 rows, returns at most limit, and constructs the next
 boundary from the last returned row when a lookahead exists. Newer inserts cannot

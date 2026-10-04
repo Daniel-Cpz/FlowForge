@@ -18,12 +18,16 @@ func (clientLogger) Printf(ctx context.Context, _ string, _ ...interface{}) {
 	slog.DebugContext(ctx, "Redis client diagnostic", "event", "redis_client_diagnostic")
 }
 
-// Open verifies connectivity only; Redis does not carry jobs in Phase 0.
-func Open(ctx context.Context, addr, password string, db int) (*redis.Client, error) {
+// NewClient allows the worker to start its bounded retry loops during an outage.
+func NewClient(addr, password string, db int) *redis.Client {
 	configureLogger.Do(func() { redis.SetLogger(clientLogger{}) })
-	c := redis.NewClient(&redis.Options{Addr: addr, Password: password, DB: db,
+	return redis.NewClient(&redis.Options{Addr: addr, Password: password, DB: db,
 		DialTimeout: 3 * time.Second, ReadTimeout: 3 * time.Second, WriteTimeout: 3 * time.Second,
 		ContextTimeoutEnabled: true, MaxRetries: -1})
+}
+
+func Open(ctx context.Context, addr, password string, db int) (*redis.Client, error) {
+	c := NewClient(addr, password, db)
 	if err := c.Ping(ctx).Err(); err != nil {
 		_ = c.Close()
 		return nil, err

@@ -12,6 +12,7 @@ x-app-env: &app-env
   FLOWFORGE_REDIS_ADDR: redis:6379
   FLOWFORGE_REDIS_PASSWORD: ${FLOWFORGE_REDIS_PASSWORD:-}
   FLOWFORGE_REDIS_DB: ${FLOWFORGE_REDIS_DB:-0}
+  FLOWFORGE_REDIS_STREAM: ${FLOWFORGE_REDIS_STREAM:-flowforge:jobs:v1}
   FLOWFORGE_LOG_LEVEL: ${FLOWFORGE_LOG_LEVEL:-INFO}
 
 services:
@@ -35,7 +36,9 @@ services:
     image: redis:8.2-alpine
     environment:
       REDIS_PASSWORD: ${FLOWFORGE_REDIS_PASSWORD:-}
-    command: ["sh", "-c", "exec redis-server --save '' --appendonly no --requirepass \"$$REDIS_PASSWORD\""]
+    command: ["sh", "-c", "exec redis-server --save '' --appendonly yes --appendfsync everysec --maxmemory-policy noeviction --requirepass \"$$REDIS_PASSWORD\""]
+    volumes:
+      - redis_data:/data
     ports:
       - "127.0.0.1:${FLOWFORGE_REDIS_PUBLISHED_PORT:-6379}:6379"
     healthcheck:
@@ -102,5 +105,6 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
   go_modules:
   go_build:

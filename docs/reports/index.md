@@ -10,7 +10,8 @@ never infer the phase from report ordering.
 - [Automation infrastructure report](phase-automation-infrastructure-report.md)
 
 - [Phase 1 — API and persistence correctness](phase-1-report.md)
+- [Phase 2 — Durable dispatch and single-worker execution](phase-2-report.md)
 
-The numbered report contains Phase 1's own evidence. Read state for its published
+Each numbered report contains that Phase's own evidence. Read state for its published
 completion/Git checkpoint; the infrastructure report is independent and cannot
 substitute for phase completion.

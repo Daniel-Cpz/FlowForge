@@ -4,6 +4,13 @@ GitHub repository state is the shared automation source of truth. Consumers read
 one repository revision, starting at `automation/state.json`; they do not infer
 completion from chat history, the project README, or report ordering.
 
+The current shared entry branch is `codex/phase1-api-correctness` in
+`Daniel-Cpz/FlowForge`, including the Phase 2 handoff and execution. Read state,
+README, report and prompt at one revision of that actual branch; do not guess
+branch names or assume default `main` contains phase state. `main` still contains
+Phase 0 until an explicitly authorized merge. Retaining this branch avoids a
+second competing state source; its historical name does not define current_phase.
+
 ## Independent documentation
 
 | File | Responsibility |
@@ -145,6 +152,7 @@ tools image can run focused checks without application services:
 docker run --rm --mount "type=bind,source=$($PWD.Path),target=/src,readonly" -w /src -e GOTOOLCHAIN=local -e GOFLAGS=-mod=readonly flowforge-tools sh -c 'git config --global --add safe.directory /src && go test -count=1 ./scripts/validate-phase-state && go run ./scripts/validate-phase-state'
 ```
 
-The current Phase 1 source is manual with null prompt_path. Its independent
-report and machine-readable state certify completion only after all gates pass.
+Phase 1's source was manual with null prompt_path. Phase 2 uses automation and
+automation/prompts/phase-2.md. Its independent report and machine-readable state
+certify completion only after all gates pass.
 The infrastructure report alone does not certify a numbered phase or Phase 0.
