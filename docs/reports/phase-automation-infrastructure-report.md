@@ -3,7 +3,8 @@
 ## Status
 
 Implementation and focused validation: PASS.
-Git publication: BLOCKED by automatic approval review; push was not executed.
+Git publication: PASS; implementation and initial report metadata were pushed,
+and the remote branch SHA was verified.
 This is an infrastructure report, not a Phase 1 completion report.
 
 ## Implemented
@@ -131,9 +132,10 @@ Remote access initially encountered Git's ownership protection; a command-local
 `safe.directory` setting for this workspace resolved it. No global host Git
 configuration was changed.
 
-Automatic approval review rejected the branch push before execution. Local
-commit evidence is retained. No retry through an alternate tool or transport was
-attempted. No remote publication or remote CI success is claimed.
+Automatic approval review initially rejected the branch push before execution.
+The user then explicitly approved the exact payload, repository, and branch.
+The same push succeeded after that approval; no alternate tool or transport was
+used to bypass the rejection. Remote CI success has not been verified.
 
 ## Git Branch
 
@@ -143,8 +145,11 @@ attempted. No remote publication or remote CI success is claimed.
 
 Implementation checkpoint: `f468d0940a580787750cfc24c54fd768644f7f17`
 (`chore: add phase automation state tracking`).
-This follow-up metadata change records that real implementation SHA; the report
-does not claim to contain its own commit SHA.
+Initial report metadata: `b3459ce1189104b5d6f9b8448e5ea1136b87577c`
+(`docs: record infrastructure validation and publication blocker`).
+These two commits were pushed together after explicit user approval. A subsequent
+report-only commit records the successful push; the report does not claim to
+contain its own commit SHA.
 
 ## Git Tag
 
@@ -152,22 +157,19 @@ None. No existing annotated phase-tag convention was found. No tag was created.
 
 ## GitHub Push Result
 
-BLOCKED: GitHub push was not executed. Automatic approval review rejected:
+PASS after explicit user approval:
 
 ```sh
 git push -u origin codex/phase1-api-correctness
 ```
 
 Destination: `https://github.com/Daniel-Cpz/FlowForge.git`.
-Reason: pushing would export the committed documentation and tooling; review
-found no explicit authorization for this exact payload/destination and had not
-verified that the remote was user-owned or otherwise trusted. Explicit user
-approval is required before retrying this push. No force push or main merge
-occurred.
-
-Origin read access succeeded and remote `main` points to
-`aa96182a037bfc502927125246e07733d0e8dbd3`; the current work branch was not yet
-published at the time of inspection. No completed remote sync is claimed.
+The branch was created and now tracks `origin/codex/phase1-api-correctness`.
+Verified with `git ls-remote --heads origin codex/phase1-api-correctness` at
+`2026-10-04T17:20:38Z`; the remote SHA matched
+`b3459ce1189104b5d6f9b8448e5ea1136b87577c`, containing both the implementation
+and initial report metadata commits. This report-only follow-up records that
+confirmed publication. No force push or main merge occurred.
 
 ## Current Phase
 
@@ -203,16 +205,12 @@ successful infrastructure change does not complete Phase 1.
   verification.
 - The working tree retains pre-existing Phase 1 business edits, which are outside
   this report's validation and commit scope.
-- GitHub publication is blocked by automatic approval review. The local
-  infrastructure commit and report metadata are ready for the requested push
-  once the user explicitly approves this payload and destination.
+- Remote CI status has not been verified; the reported tests are the focused
+  local infrastructure checks described above.
 
 ## Next Action
 
-Obtain explicit user approval to push the infrastructure commit and report
-metadata to `origin/codex/phase1-api-correctness` in
-`https://github.com/Daniel-Cpz/FlowForge.git`; then push without force and verify
-the remote head. Finish Phase 1 separately, write its independent phase report,
+Finish Phase 1 separately, write its independent phase report,
 synchronize the whole-project README, and update state only after its completion
 gates pass. External Automation then reviews that report before writing the
 Phase 2 prompt and advancing `last_processed_phase`.
