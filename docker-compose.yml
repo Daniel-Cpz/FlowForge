@@ -1,0 +1,106 @@
+name: flowforge
+
+x-app-env: &app-env
+  FLOWFORGE_ENV: ${FLOWFORGE_ENV:-development}
+  FLOWFORGE_HTTP_ADDR: :8080
+  FLOWFORGE_POSTGRES_HOST: postgres
+  FLOWFORGE_POSTGRES_PORT: "5432"
+  FLOWFORGE_POSTGRES_USER: ${FLOWFORGE_POSTGRES_USER:-flowforge}
+  FLOWFORGE_POSTGRES_PASSWORD: ${FLOWFORGE_POSTGRES_PASSWORD:?Set FLOWFORGE_POSTGRES_PASSWORD in .env}
+  FLOWFORGE_POSTGRES_DB: ${FLOWFORGE_POSTGRES_DB:-flowforge}
+  FLOWFORGE_POSTGRES_SSLMODE: ${FLOWFORGE_POSTGRES_SSLMODE:-disable}
+  FLOWFORGE_REDIS_ADDR: redis:6379
+  FLOWFORGE_REDIS_PASSWORD: ${FLOWFORGE_REDIS_PASSWORD:-}
+  FLOWFORGE_REDIS_DB: ${FLOWFORGE_REDIS_DB:-0}
+  FLOWFORGE_LOG_LEVEL: ${FLOWFORGE_LOG_LEVEL:-INFO}
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: ${FLOWFORGE_POSTGRES_USER:-flowforge}
+      POSTGRES_PASSWORD: ${FLOWFORGE_POSTGRES_PASSWORD:?Set FLOWFORGE_POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${FLOWFORGE_POSTGRES_DB:-flowforge}
+    ports:
+      - "127.0.0.1:${FLOWFORGE_POSTGRES_PUBLISHED_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:8.2-alpine
+    environment:
+      REDIS_PASSWORD: ${FLOWFORGE_REDIS_PASSWORD:-}
+    command: ["sh", "-c", "exec redis-server --save '' --appendonly no --requirepass \"$$REDIS_PASSWORD\""]
+    ports:
+      - "127.0.0.1:${FLOWFORGE_REDIS_PUBLISHED_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrate:
+    build: .
+    command: ["/app/migrate", "up"]
+    environment: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build: .
+    environment: *app-env
+    ports:
+      - "127.0.0.1:${FLOWFORGE_API_PUBLISHED_PORT:-8080}:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    stop_grace_period: 15s
+
+  worker:
+    build: .
+    command: ["/app/worker"]
+    environment: *app-env
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    stop_grace_period: 15s
+
+  tools:
+    profiles: ["tools"]
+    build:
+      context: .
+      target: development
+    environment:
+      <<: *app-env
+      FLOWFORGE_INTEGRATION: "1"
+    volumes:
+      - .:/src
+      - go_modules:/go/pkg/mod
+      - go_build:/root/.cache/go-build
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: ["sh", "scripts/check.sh"]
+
+volumes:
+  postgres_data:
+  go_modules:
+  go_build:

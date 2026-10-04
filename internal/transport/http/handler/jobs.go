@@ -1,0 +1,133 @@
+package handler
+
+import (
+	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
+	"net/http"
+	"strconv"
+	"strings"
+
+	domain "github.com/Daniel-Cpz/FlowForge/internal/domain/job"
+	service "github.com/Daniel-Cpz/FlowForge/internal/service/job"
+	"github.com/google/uuid"
+)
+
+type Jobs struct {
+	service *service.Service
+	logger  *slog.Logger
+}
+
+func NewJobs(s *service.Service, logger *slog.Logger) *Jobs { return &Jobs{service: s, logger: logger} }
+
+func writeJSON(w http.ResponseWriter, status int, data any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(data)
+}
+
+func writeError(w http.ResponseWriter, status int, code, message string) {
+	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": message}})
+}
+
+func (h *Jobs) fail(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, domain.ErrInvalidInput):
+		writeError(w, 400, "INVALID_INPUT", "invalid job input")
+	case errors.Is(err, domain.ErrNotFound):
+		writeError(w, 404, "JOB_NOT_FOUND", "job not found")
+	default:
+		// Driver errors may contain connection details or user data; log classification only.
+		h.logger.ErrorContext(r.Context(), "job request failed", "event", "job_request_failed", "method", r.Method)
+		writeError(w, 500, "INTERNAL_ERROR", "internal server error")
+	}
+}
+
+func (h *Jobs) Create(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	defer r.Body.Close()
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	var in *service.CreateInput
+	if err := decoder.Decode(&in); err != nil {
+		h.decodeError(w, err)
+		return
+	}
+	if in == nil {
+		writeError(w, 400, "INVALID_JSON", "expected a JSON object")
+		return
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		h.decodeError(w, err)
+		return
+	}
+	j, err := h.service.Create(r.Context(), *in)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	w.Header().Set("Location", "/api/v1/jobs/"+j.ID.String())
+	writeJSON(w, 201, j)
+}
+
+func (h *Jobs) decodeError(w http.ResponseWriter, err error) {
+	var sizeErr *http.MaxBytesError
+	if errors.As(err, &sizeErr) {
+		writeError(w, 413, "BODY_TOO_LARGE", "request body exceeds 1 MiB")
+		return
+	}
+	writeError(w, 400, "INVALID_JSON", "expected one valid JSON object with known fields")
+}
+
+func (h *Jobs) Get(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil || len(r.PathValue("id")) != 36 {
+		writeError(w, 400, "INVALID_ID", "invalid job UUID")
+		return
+	}
+	j, err := h.service.GetByID(r.Context(), id)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	writeJSON(w, 200, j)
+}
+
+func (h *Jobs) List(w http.ResponseWriter, r *http.Request) {
+	limit, offset := 20, 0
+	query, err := r.URL.Query(), error(nil)
+	for key, values := range query {
+		if (key != "limit" && key != "offset") || len(values) != 1 || strings.TrimSpace(values[0]) == "" {
+			writeError(w, 400, "INVALID_INPUT", "invalid pagination")
+			return
+		}
+	}
+	if query.Has("limit") {
+		limit, err = strconv.Atoi(query.Get("limit"))
+	}
+	if err == nil && query.Has("offset") {
+		offset, err = strconv.Atoi(query.Get("offset"))
+	}
+	if err != nil {
+		writeError(w, 400, "INVALID_INPUT", "invalid pagination")
+		return
+	}
+	jobs, err := h.service.List(r.Context(), limit, offset)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"jobs": jobs, "limit": limit, "offset": offset})
+}
+
+// RoutingError keeps unknown routes and unsupported methods in the same envelope.
+func RoutingError(w http.ResponseWriter, r *http.Request, knownPath bool, allow string) {
+	if knownPath {
+		w.Header().Set("Allow", allow)
+		writeError(w, 405, "METHOD_NOT_ALLOWED", "method not allowed")
+		return
+	}
+	writeError(w, 404, "NOT_FOUND", "route not found")
+}

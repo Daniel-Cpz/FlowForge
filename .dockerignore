@@ -1,0 +1,14 @@
+.git
+.env*
+!.env.example
+bin
+tmp
+data
+volumes
+*.pem
+*.key
+*.log
+.codex
+.agents
+.aws
+.ssh
