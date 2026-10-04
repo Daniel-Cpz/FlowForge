@@ -17,8 +17,8 @@ readback, safe error mapping and expanded real-database coverage. The existing
 automation protocol now tracks both manual and automated prompt sources.
 
 This report records completed implementation and validation. The real Git
-checkpoint is recorded in a follow-up metadata commit; authoritative state stays
-in_progress until that checkpoint/tag and report evidence are verified.
+checkpoint below is recorded in a follow-up metadata commit; completed state is
+published only after checkpoint/tag and report evidence are verified.
 
 ## Prompt Source
 
@@ -168,6 +168,8 @@ removed. Git validator fixtures use disposable temporary repositories.
 | go test -count=1 -v ./scripts/validate-phase-state | PASS, original/new tests, no skips |
 | go vet ./scripts/validate-phase-state | PASS |
 | go run ./scripts/validate-phase-state | PASS for manual/in_progress state |
+| go run ./scripts/validate-phase-state -root . -state automation/state.next.json | PASS for prospective completed state and real report/commit/tag |
+| go run ./scripts/validate-phase-state (after atomic state replacement) | PASS for final completed state |
 | go test -race -count=1 ./internal/service/job ./internal/transport/http/... ./tests/integration | PASS |
 | gofmt -l cmd internal migrations tests scripts/validate-phase-state | PASS, no unformatted files |
 | go vet ./... | PASS |
@@ -228,14 +230,23 @@ priority scheduling, dashboard, tracing/metrics or cloud infrastructure was adde
 ## Git
 
 - Branch: codex/phase1-api-correctness
-- Commit: Pending implementation/report checkpoint; fill the actual SHA in the metadata follow-up.
-- Tag: Pending annotated phase1-api-correctness at that checkpoint.
-- GitHub Push Result: Pending final publication; no successful Phase 1 push is claimed yet.
+- Commit: 6d197f25088bdfcb1aa8485590e839218eac3813
+- Message: feat: complete phase 1 API and persistence correctness
+- Tag: phase1-api-correctness, annotated, resolving to that implementation/report checkpoint.
+- GitHub Push Result: SUCCESS; checkpoint and tag were pushed to Daniel-Cpz/FlowForge
+  and verified with git ls-remote at 2026-10-04T17:44:53Z. The branch and peeled tag
+  both resolved to 6d197f25088bdfcb1aa8485590e839218eac3813.
 
 Git Commit identifies the implementation/report checkpoint, not a file's own SHA.
 Git Tag points to that checkpoint; a later metadata commit records completed state.
 The previous infrastructure history and main are preserved; no force push or
 automatic main merge is authorized by this release workflow.
+
+Completed-state metadata is a subsequent commit on the same branch, so its head
+can be newer than the pinned implementation/report commit. No file claims its
+own commit hash. Intended-file staging, private-key/token signature scans, local
+database/Redis password leak checks, generated/large-file checks and staged
+whitespace inspection passed. No .env or runtime credential was committed.
 
 ## Documentation Updated
 

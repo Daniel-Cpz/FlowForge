@@ -243,6 +243,7 @@ Phase 1 delivers **Job Persistence + API Correctness**. The next recommended pha
 is **Phase 2 — Redis Queue + Single Worker Execution**, including an explicit
 solution for database/queue dual-write failure. Phase 2 is not implemented.
 See the [Phase 0–10 roadmap](docs/development-roadmap.md) and authoritative phase state.
+The [Phase 1 report](docs/reports/phase-1-report.md) records its validation and Git checkpoint.
 This repository does not claim exactly-once execution. Future delivery is planned
 as at-least-once; business side effects will need their own idempotency safeguards.
 
