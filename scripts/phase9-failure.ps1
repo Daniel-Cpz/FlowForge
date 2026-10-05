@@ -101,13 +101,18 @@ try{
  Phase9Docker @('start',$collector)|Out-Null
  $exported=Phase9Post $e '{"type":"SLEEP","payload":{"duration_ms":25}}';Phase9Terminal $e $exported.id|Out-Null
  Phase9Wait {$traceLogs=(Phase9Docker @('logs',$collector) 2>&1)|Out-String;$traceLogs.Contains($j.id) -and $traceLogs.Contains('attempt.number') -and $traceLogs.Contains('attempt.execute')} 15 'real OTLP Job/Attempt export'
- $query=Invoke-RestMethod ($prom+'/api/v1/query?query='+[Uri]::EscapeDataString('max(flowforge_jobs_current{status="SUCCEEDED"})'))
- if($query.status -ne 'success' -or $query.data.result.Count -ne 1 -or [double]$query.data.result[0].value[1] -lt 4){throw 'Prometheus authoritative success query failed'}
+ Phase9Wait {
+  $query=Invoke-RestMethod ($prom+'/api/v1/query?query='+[Uri]::EscapeDataString('max(flowforge_jobs_current{status="SUCCEEDED"})'))
+  $query.status -eq 'success' -and $query.data.result.Count -eq 1 -and [double]$query.data.result[0].value[1] -ge 4
+ } 15 'Prometheus next snapshot scrape'
  foreach($expression in @('sum(flowforge_job_attempt_duration_seconds_count)','sum(flowforge_http_request_duration_seconds_count)')){
   $sample=Invoke-RestMethod ($prom+'/api/v1/query?query='+[Uri]::EscapeDataString($expression))
   if($sample.status -ne 'success' -or $sample.data.result.Count -ne 1 -or [double]$sample.data.result[0].value[1] -le 0){throw 'Prometheus histogram observations missing'}
  }
+ Phase9Owned $e $promID;Phase9Docker @('stop',$promID)|Out-Null
+ $unscraped=Phase9Post $e '{"type":"SLEEP","payload":{"duration_ms":25}}';Phase9Terminal $e $unscraped.id|Out-Null
  Write-Output 'Observability PASS: API and scaled Worker UP; Grafana datasource/dashboard provisioned; actual counters/histograms; WS gauge; OTLP Job/Attempt traces; exporter outage does not affect committed success.'
+ Write-Output 'Prometheus outage PASS: independent Job reached committed SUCCEEDED while scraper was stopped.'
 }finally{
  if($socket){$socket.Abort();$socket.Dispose()}
  Phase9Close $e

@@ -223,7 +223,7 @@ new binaries against that legacy DB. See [Dashboard contract](dashboard.md).
 
 Metrics are enabled by default: API GET /metrics, Worker internal :9091/metrics.
 FLOWFORGE_METRICS_ENABLED disables endpoint serving/HTTP metric observation;
-FLOWFORGE_WORKER_METRICS_ADDR configures the internal listener. OTel defaults
+FLOWFORGE_METRICS_ADDR configures the internal listener. OTel defaults
 disabled; enable FLOWFORGE_OTEL_ENABLED and configure HTTP OTLP endpoint and finite
 sample ratio 0..1. Listener failure drains the Worker; serving/export resources
 join within bounded shutdown. Metrics/logs/traces are diagnostics, not authority.

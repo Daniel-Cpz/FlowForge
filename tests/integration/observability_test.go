@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/Daniel-Cpz/FlowForge/internal/domain/job"
 	"github.com/Daniel-Cpz/FlowForge/internal/infrastructure/postgres"
 	"github.com/Daniel-Cpz/FlowForge/internal/observability"
 	"github.com/Daniel-Cpz/FlowForge/internal/service/execution"
 	service "github.com/Daniel-Cpz/FlowForge/internal/service/job"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"go.opentelemetry.io/otel"
 	sdk "go.opentelemetry.io/otel/sdk/trace"
@@ -79,6 +81,61 @@ func TestDurableTraceReplayWorkerAndCommittedMetrics(t *testing.T) {
 	}
 	if _, e = pool.Exec(ctx, `UPDATE jobs SET traceparent='malformed' WHERE id=$1`, first.ID); e == nil {
 		t.Fatal("trace constraint")
+	}
+}
+
+func TestCommittedTelemetryHonorsCallerCancellation(t *testing.T) {
+	pool := migratedDatabase(t)
+	cfg := pool.Config()
+	cfg.MaxConns = 1
+	telemetry, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer telemetry.Close()
+	held, err := telemetry.Acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Release() // Saturate only the independent telemetry pool.
+	repo := leaseRepo(t, pool).WithTelemetryPool(telemetry)
+	id := registered(t, repo)
+	j := createSleep(t, pool, `{"duration_ms":0}`)
+	claimed, err := repo.Claim(t.Context(), j.ID, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := observability.NewMetrics(nil)
+	ctx, cancel := context.WithCancel(observability.WithMetrics(t.Context(), m))
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- repo.Finalize(ctx, claimed, job.Succeeded, json.RawMessage(`{}`)) }()
+	// Observe the real commit before cancelling a blocked diagnostic read.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		stored, e := repo.GetByID(t.Context(), j.ID)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if stored.Status == job.Succeeded {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("business commit not visible")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	select {
+	case e := <-done:
+		if e != nil {
+			t.Fatal("telemetry changed committed result", e)
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("telemetry detached from caller cancellation")
+	}
+	if testutil.ToFloat64(m.Attempts.WithLabelValues("succeeded")) != 0 {
+		t.Fatal("blocked diagnostic read fabricated measurement")
 	}
 }
 

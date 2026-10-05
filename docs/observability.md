@@ -61,7 +61,8 @@ They are diagnostic observations, not a durable audit/ billing source.
 Global state uses one PG statement per scrape with a one-second deadline and
 one concurrent collection. A separate lazy two-connection telemetry PG pool
 isolates scrapes/Attempt measurements from the execution pool. Post-commit Attempt
-measurement reads have a one-second bound and can be lost on DB/telemetry failure;
+measurement reads have a one-second bound, retain the caller/batch cancellation
+deadline and can be lost on DB/telemetry failure;
 they cannot change the business commit or ACK authority. Scrape requests are capped
 at two with a two-second HTTP bound. Worker metrics HTTP has bounded reads/writes
 and joined shutdown; listener failure is reported and initiates drain.

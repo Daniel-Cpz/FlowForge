@@ -18,7 +18,9 @@ func (r *JobRepository) recordAttempt(ctx context.Context, j *job.Job, defaultOu
 	}
 	ctx, span := observability.Start(observability.Restore(ctx, j.TraceParent), "attempt.committed", attribute.String("job.id", j.ID.String()), attribute.Int("attempt.number", j.AttemptCount))
 	defer span.End()
-	read, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+	// Retain the caller's cancellation/batch deadline. A recovery batch must not
+	// accumulate a fresh one-second wait per Attempt after its three-second budget.
+	read, cancel := context.WithTimeout(ctx, time.Second)
 	defer cancel()
 	pool := r.telemetryPool
 	if pool == nil {
