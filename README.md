@@ -20,7 +20,6 @@ Submit → Persist → Notify → Schedule → Execute → Recover / Retry → C
 **Released · Maintenance / Portfolio.** The production-like Docker topology is
 validated locally and in GitHub CI. Real VPS/EC2 deployment has not been performed
 and is optional under the [release scope decision](docs/decisions/0012-v1-local-production-acceptance.md).
-The repository remains private; links require repository access.
 
 ## Why FlowForge?
 
