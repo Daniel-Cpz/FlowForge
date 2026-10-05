@@ -149,8 +149,11 @@ Real cloud/publication is not a release gate. See [release policy](../release-re
 Branch: codex/phase1-api-correctness.
 Previous progress metadata checkpoint: b9aced4865cc4d6e005602001de8ca42982f82fb.
 Tested scope/validator checkpoint: bf630ff5e029ac1eec153c4baecf8e541bbc9c8b.
-Final implementation/report checkpoint: recorded by follow-up Git metadata after
-this completed report exists in a real commit. Push: normal shared-branch publication.
+Final implementation/report checkpoint: 1c1e5d44479fb310f69b0b5e6ffe4817a122a97f.
+This later metadata change records its identity; no file claims its own SHA.
+Push evidence: tested scope checkpointbf630ff was pushed successfully. Final
+checkpoint/state publication uses normal shared-branch push; remote HEAD/state
+readback is verified in the final completion log. No force or history rewrite.
 Tag: none; no cloud-named tag.
 Main remains aa96182a037bfc502927125246e07733d0e8dbd3; review required before
 main/version release. Later metadata records the real checkpoint SHA; no self-reference.
@@ -174,3 +177,5 @@ Finalization execution ID: phase-10-finalization-20261005T122510Z.
 Cloud removal never weakens TLS/auth/SSH verification or correctness gates.
 The schema remains version1 and no new state fields are added. Completion and
 v1.0.0 READY are published only after final tests and a real report checkpoint.
+Prospective completed state (new report and real1c1e5d4 checkpoint) and focused
+validator tests PASS before atomic state replacement/publication.
