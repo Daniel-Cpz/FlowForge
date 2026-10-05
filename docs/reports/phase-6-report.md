@@ -105,7 +105,7 @@ schema and random Redis namespace; no public application data or FLUSHDB.
 - `./scripts/phase6-smoke.ps1`: PASS; PowerShell syntax parse PASS.
 - `git diff --check`: PASS; historical migrations/reports/prompts diff empty.
 - Readonly retained DB/services/generated-resource audit: PASS (details below).
-- Prospective completed-state validator: PASS after normalizing the Phase field to exact Phase 6; actual checkpoint/tag/report evidence validated before atomic replacement. The validator also reads checkpoint report contents; publish a corrected report checkpoint before final state. Final state retains last_processed_phase=5, next_prompt=null.
+- Prospective completed-state validator: PASS after normalizing the Phase field to exact Phase 6; actual checkpoint/tag/report evidence validated before atomic replacement. The validator also reads checkpoint report contents; corrected report checkpoint 3673d56 and annotated v2 tag now PASS. Final state retains last_processed_phase=5, next_prompt=null.
 
 ## Test Results
 
@@ -206,15 +206,15 @@ codex/phase1-api-correctness
 
 ### Git Commit
 
-Implementation revision: 414da6b9bcb3d7cf8c1a9dd83d6cbeead533fd49. Validated report checkpoint is the subsequent format-repair commit; real identity is recorded in final metadata.
+Implementation revision: 414da6b9bcb3d7cf8c1a9dd83d6cbeead533fd49. Validated implementation/report checkpoint: 3673d56dbf466241225ebe383d47c10d8b60d246 (report-only repair commit; tested production sources unchanged).
 
 ### Git Tag
 
-Final annotated phase6-control-dlq-v2 will target the validated report checkpoint. Earlier phase6-control-dlq remains a published in_progress artifact at implementation revision 414da6b; its report format did not satisfy completed-state validation and it is not the completion tag. No tag/history rewriting.
+Final annotated phase6-control-dlq-v2 targets 3673d56dbf466241225ebe383d47c10d8b60d246, verified locally and remotely. Earlier phase6-control-dlq remains a published in_progress artifact at implementation revision 414da6b; its report format did not satisfy completed-state validation and it is not the completion tag. No tag/history rewriting.
 
 ### GitHub Push Result
 
-PASS: checkpoint/annotated tag pushed atomically and remote branch/peeled tag verified. This report/state metadata is published in the follow-up commit; prospective completed-state validation is required before replacement.
+PASS: validated checkpoint/annotated v2 tag pushed atomically and remote branch/peeled tag verified; main unchanged. This report/state metadata is published in the follow-up commit; prospective completed-state validation is required before replacement.
 main remains aa96182a037bfc502927125246e07733d0e8dbd3; no automatic merge/history rewrite.
 
 ## Documentation Updated
