@@ -8,11 +8,10 @@ Phase 4
 
 COMPLETED
 
-Technical acceptance and final independent-process smoke PASS. This report is
-prepared in the implementation checkpoint with Git publication fields pending;
-automation state stays in_progress until checkpoint/tag publication and state
-validation pass. A metadata-only follow-up records verified Git evidence. A
-checkpoint cannot contain its own SHA.
+Technical acceptance, final independent-process smoke, implementation/tag push
+and state validation PASS. The implementation checkpoint necessarily prepared
+Git fields without its own SHA; this metadata-only follow-up records verified
+evidence. Claim state stayed in_progress through checkpoint/tag publication.
 
 ## Summary
 
@@ -105,7 +104,7 @@ tools sh -c '<commands>'; validator additionally used process-local Git safe.dir
 | go test -count=1 ./... | Final PASS; execution 5.340s, integration 8.722s, state-validator tests 0.201s |
 | Final affected race command above | PASS; dispatch 1.072s, execution 6.359s, job service 1.009s, real integration 10.096s; adapters covered through integration |
 | go vet ./...; go build ./... | PASS, final combined invocation |
-| go run ./scripts/validate-phase-state | PASS for claimed in_progress state; prospective and published completion checked during Git publication |
+| go run ./scripts/validate-phase-state | PASS for claim and prospective completed state with real checkpoint/tag; final state validated before metadata publication |
 | gofmt -l cmd internal migrations tests scripts/validate-phase-state | PASS, empty after formatting |
 | ./scripts/phase4-smoke.ps1 | Initial SIGKILL/pause/graceful PASS; expanded network run cleanup failed; final corrected four-case smoke and cleanup PASS, exit 0 |
 | PowerShell parser on smoke script; git diff --check | PASS |
@@ -217,11 +216,15 @@ syntax verified; this output-order refinement does not alter tested recovery.
 
 - Branch: codex/phase1-api-correctness.
 - Ownership commit: 7eff93338ef9646a24355136b36896d546c0ff9b, pushed/verified.
-- Implementation checkpoint: PENDING_CHECKPOINT (filled by follow-up metadata).
-- Annotated tag: phase4-lease-recovery, publication/target verification pending.
-- GitHub push: pending checkpoint/tag and completion metadata publication.
+- Implementation checkpoint: 40f1250ac64f12bcb51e799a8cbdce8cc45d6f00.
+- Annotated tag: phase4-lease-recovery; object 4ef38da30802da19827fe1a52cc956c3400661f8;
+  target verified as the checkpoint locally and remotely.
+- GitHub push: implementation + tag normal atomic push PASS; remote refs verified
+  at 2026-10-05T04:40:47Z. Completion metadata's own commit/push SHA is recorded in
+  the Codex completion log; it cannot be self-embedded in this file.
 - State commit references the implementation/report checkpoint, not metadata commit.
-- main must remain aa96182a037bfc502927125246e07733d0e8dbd3; no merge/force/history rewrite.
+- main verified unchanged at aa96182a037bfc502927125246e07733d0e8dbd3;
+  no merge/force/history rewrite.
 
 ## Documentation Updated
 
