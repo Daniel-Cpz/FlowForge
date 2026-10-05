@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
   "project": "FlowForge",
-  "current_phase": 8,
-  "status": "completed",
-  "report": "docs/reports/phase-8-report.md",
-  "next_prompt": "automation/prompts/phase-9.md",
+  "current_phase": 9,
+  "status": "in_progress",
+  "report": null,
+  "next_prompt": null,
   "last_processed_phase": 8,
   "branch": "codex/phase1-api-correctness",
-  "commit": "c349113f0f2423890fe199a81308e40cedd695d7",
-  "tag": "phase8-dashboard-websocket",
-  "updated_at": "2026-10-05T08:54:39Z",
+  "commit": null,
+  "tag": null,
+  "updated_at": "2026-10-05T09:20:54Z",
   "prompt_source": "automation",
-  "prompt_path": "automation/prompts/phase-8.md"
+  "prompt_path": "automation/prompts/phase-9.md"
 }
