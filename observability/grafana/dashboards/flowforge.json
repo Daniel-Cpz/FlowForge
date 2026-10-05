@@ -265,7 +265,7 @@
       "targets": [
         {
           "legendFormat": "{{status}}{{outcome}}{{reason}}{{instance}}",
-          "expr": "sum(rate(flowforge_http_request_duration_seconds_count{status_class=\"5xx\"}[1m])) / clamp_min(sum(rate(flowforge_http_request_duration_seconds_count{route!=\"/api/v1/ws\"}[1m])),0.000001)",
+          "expr": "sum(rate(flowforge_http_request_duration_seconds_count{status_class=\"5xx\",route!=\"/api/v1/ws\"}[1m])) / clamp_min(sum(rate(flowforge_http_request_duration_seconds_count{route!=\"/api/v1/ws\"}[1m])),0.000001)",
           "refId": "A"
         }
       ]

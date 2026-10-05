@@ -1,0 +1,410 @@
+[
+  {
+    "workers": 1,
+    "repetition": 1,
+    "commit": "6915f6764190a3557251870de1b4dcb692a0f6bb",
+    "project": "ffp9-20261005100526-a49c8322",
+    "summary": {
+      "jobs": 500,
+      "submit_requests": 500,
+      "submit_errors": 0,
+      "completed": 500,
+      "succeeded": 500,
+      "failed": 0,
+      "dead_letter": 0,
+      "cancelled": 0,
+      "timed_out": 0,
+      "unfinished": 0,
+      "poll_errors": 0,
+      "wall_seconds": 15.304958924,
+      "throughput_jobs_per_second": 32.66915007631549,
+      "submit_error_rate": 0,
+      "terminal_error_rate": 0,
+      "error_rate": 0,
+      "queue_latency": {
+        "p50_seconds": 7.805673,
+        "p95_seconds": 14.458918,
+        "p99_seconds": 15.047647
+      },
+      "end_to_end_latency": {
+        "p50_seconds": 7.83244,
+        "p95_seconds": 14.486201,
+        "p99_seconds": 15.074592
+      }
+    }
+  },
+  {
+    "workers": 1,
+    "repetition": 2,
+    "commit": "6915f6764190a3557251870de1b4dcb692a0f6bb",
+    "project": "ffp9-20261005100555-64ba3711",
+    "summary": {
+      "jobs": 500,
+      "submit_requests": 500,
+      "submit_errors": 0,
+      "completed": 500,
+      "succeeded": 500,
+      "failed": 0,
+      "dead_letter": 0,
+      "cancelled": 0,
+      "timed_out": 0,
+      "unfinished": 0,
+      "poll_errors": 0,
+      "wall_seconds": 15.358216223,
+      "throughput_jobs_per_second": 32.5558640886443,
+      "submit_error_rate": 0,
+      "terminal_error_rate": 0,
+      "error_rate": 0,
+      "queue_latency": {
+        "p50_seconds": 7.820945,
+        "p95_seconds": 14.481395,
+        "p99_seconds": 15.067587
+      },
+      "end_to_end_latency": {
+        "p50_seconds": 7.848828,
+        "p95_seconds": 14.508713,
+        "p99_seconds": 15.095085
+      }
+    }
+  },
+  {
+    "workers": 1,
+    "repetition": 3,
+    "commit": "6915f6764190a3557251870de1b4dcb692a0f6bb",
+    "project": "ffp9-20261005100624-3e1b758f",
+    "summary": {
+      "jobs": 500,
+      "submit_requests": 500,
+      "submit_errors": 0,
+      "completed": 500,
+      "succeeded": 500,
+      "failed": 0,
+      "dead_letter": 0,
+      "cancelled": 0,
+      "timed_out": 0,
+      "unfinished": 0,
+      "poll_errors": 0,
+      "wall_seconds": 15.325473126,
+      "throughput_jobs_per_second": 32.62542016740345,
+      "submit_error_rate": 0,
+      "terminal_error_rate": 0,
+      "error_rate": 0,
+      "queue_latency": {
+        "p50_seconds": 7.818508,
+        "p95_seconds": 14.466665,
+        "p99_seconds": 15.056246
+      },
+      "end_to_end_latency": {
+        "p50_seconds": 7.8459389999999996,
+        "p95_seconds": 14.494201,
+        "p99_seconds": 15.083631
+      }
+    }
+  },
+  {
+    "workers": 4,
+    "repetition": 1,
+    "commit": "6915f6764190a3557251870de1b4dcb692a0f6bb",
+    "project": "ffp9-20261005100653-f2123b75",
+    "summary": {
+      "jobs": 500,
+      "submit_requests": 500,
+      "submit_errors": 0,
+      "completed": 500,
+      "succeeded": 500,
+      "failed": 0,
+      "dead_letter": 0,
+      "cancelled": 0,
+      "timed_out": 0,
+      "unfinished": 0,
+      "poll_errors": 0,
+      "wall_seconds": 11.814803215,
+      "throughput_jobs_per_second": 42.31979076597765,
+      "submit_error_rate": 0,
+      "terminal_error_rate": 0,
+      "error_rate": 0,
+      "queue_latency": {
+        "p50_seconds": 9.911033,
+        "p95_seconds": 11.527055,
+        "p99_seconds": 11.670625
+      },
+      "end_to_end_latency": {
+        "p50_seconds": 9.937945,
+        "p95_seconds": 11.553945,
+        "p99_seconds": 11.69734
+      }
+    }
+  },
+  {
+    "workers": 4,
+    "repetition": 2,
+    "commit": "6915f6764190a3557251870de1b4dcb692a0f6bb",
+    "project": "ffp9-20261005100720-a15e68b6",
+    "summary": {
+      "jobs": 500,
+      "submit_requests": 500,
+      "submit_errors": 0,
+      "completed": 500,
+      "succeeded": 500,
+      "failed": 0,
+      "dead_letter": 0,
+      "cancelled": 0,
+      "timed_out": 0,
+      "unfinished": 0,
+      "poll_errors": 0,
+      "wall_seconds": 3.776750726,
+      "throughput_jobs_per_second": 132.3889333118778,
+      "submit_error_rate": 0,
+      "terminal_error_rate": 0,
+      "error_rate": 0,
+      "queue_latency": {
+        "p50_seconds": 1.8456489999999999,
+        "p95_seconds": 3.46636,
+        "p99_seconds": 3.611455
+      },
+      "end_to_end_latency": {
+        "p50_seconds": 1.8725939999999999,
+        "p95_seconds": 3.49309,
+        "p99_seconds": 3.638025
+      }
+    }
+  },
+  {
+    "workers": 4,
+    "repetition": 3,
+    "commit": "6915f6764190a3557251870de1b4dcb692a0f6bb",
+    "project": "ffp9-20261005100738-d333c888",
+    "summary": {
+      "jobs": 500,
+      "submit_requests": 500,
+      "submit_errors": 0,
+      "completed": 500,
+      "succeeded": 500,
+      "failed": 0,
+      "dead_letter": 0,
+      "cancelled": 0,
+      "timed_out": 0,
+      "unfinished": 0,
+      "poll_errors": 0,
+      "wall_seconds": 5.537486863,
+      "throughput_jobs_per_second": 90.29366793461232,
+      "submit_error_rate": 0,
+      "terminal_error_rate": 0,
+      "error_rate": 0,
+      "queue_latency": {
+        "p50_seconds": 1.8460860000000001,
+        "p95_seconds": 5.241894,
+        "p99_seconds": 5.386166
+      },
+      "end_to_end_latency": {
+        "p50_seconds": 1.873016,
+        "p95_seconds": 5.268792,
+        "p99_seconds": 5.413274
+      }
+    }
+  },
+  {
+    "workers": 8,
+    "repetition": 1,
+    "commit": "6915f6764190a3557251870de1b4dcb692a0f6bb",
+    "project": "ffp9-20261005100759-9a901f12",
+    "summary": {
+      "jobs": 500,
+      "submit_requests": 500,
+      "submit_errors": 0,
+      "completed": 500,
+      "succeeded": 500,
+      "failed": 0,
+      "dead_letter": 0,
+      "cancelled": 0,
+      "timed_out": 0,
+      "unfinished": 0,
+      "poll_errors": 0,
+      "wall_seconds": 64.419921124,
+      "throughput_jobs_per_second": 7.761574234739667,
+      "submit_error_rate": 0,
+      "terminal_error_rate": 0,
+      "error_rate": 0,
+      "queue_latency": {
+        "p50_seconds": 49.420629,
+        "p95_seconds": 62.801666,
+        "p99_seconds": 64.088101
+      },
+      "end_to_end_latency": {
+        "p50_seconds": 49.447821,
+        "p95_seconds": 62.828603,
+        "p99_seconds": 64.115155
+      }
+    }
+  },
+  {
+    "workers": 8,
+    "repetition": 2,
+    "commit": "6915f6764190a3557251870de1b4dcb692a0f6bb",
+    "project": "ffp9-20261005100922-c3dafeed",
+    "summary": {
+      "jobs": 500,
+      "submit_requests": 500,
+      "submit_errors": 0,
+      "completed": 500,
+      "succeeded": 500,
+      "failed": 0,
+      "dead_letter": 0,
+      "cancelled": 0,
+      "timed_out": 0,
+      "unfinished": 0,
+      "poll_errors": 0,
+      "wall_seconds": 7.131248385,
+      "throughput_jobs_per_second": 70.113951023177,
+      "submit_error_rate": 0,
+      "terminal_error_rate": 0,
+      "error_rate": 0,
+      "queue_latency": {
+        "p50_seconds": 4.058107,
+        "p95_seconds": 6.946357,
+        "p99_seconds": 7.012726
+      },
+      "end_to_end_latency": {
+        "p50_seconds": 4.08513,
+        "p95_seconds": 6.9731,
+        "p99_seconds": 7.039976
+      }
+    }
+  },
+  {
+    "workers": 8,
+    "repetition": 3,
+    "commit": "6915f6764190a3557251870de1b4dcb692a0f6bb",
+    "project": "ffp9-20261005100948-d636b677",
+    "summary": {
+      "jobs": 500,
+      "submit_requests": 500,
+      "submit_errors": 0,
+      "completed": 500,
+      "succeeded": 500,
+      "failed": 0,
+      "dead_letter": 0,
+      "cancelled": 0,
+      "timed_out": 0,
+      "unfinished": 0,
+      "poll_errors": 0,
+      "wall_seconds": 12.392430199,
+      "throughput_jobs_per_second": 40.347211319402646,
+      "submit_error_rate": 0,
+      "terminal_error_rate": 0,
+      "error_rate": 0,
+      "queue_latency": {
+        "p50_seconds": 11.363644,
+        "p95_seconds": 12.153011,
+        "p99_seconds": 12.212946
+      },
+      "end_to_end_latency": {
+        "p50_seconds": 11.390308,
+        "p95_seconds": 12.179742,
+        "p99_seconds": 12.239587
+      }
+    }
+  },
+  {
+    "workers": 16,
+    "repetition": 1,
+    "commit": "6915f6764190a3557251870de1b4dcb692a0f6bb",
+    "project": "ffp9-20261005101019-2ee2abff",
+    "summary": {
+      "jobs": 500,
+      "submit_requests": 500,
+      "submit_errors": 0,
+      "completed": 500,
+      "succeeded": 500,
+      "failed": 0,
+      "dead_letter": 0,
+      "cancelled": 0,
+      "timed_out": 0,
+      "unfinished": 0,
+      "poll_errors": 0,
+      "wall_seconds": 32.225731871,
+      "throughput_jobs_per_second": 15.515551423362737,
+      "submit_error_rate": 0,
+      "terminal_error_rate": 0,
+      "error_rate": 0,
+      "queue_latency": {
+        "p50_seconds": 4.506002,
+        "p95_seconds": 31.313005,
+        "p99_seconds": 32.100134
+      },
+      "end_to_end_latency": {
+        "p50_seconds": 4.533208,
+        "p95_seconds": 31.339907,
+        "p99_seconds": 32.127367
+      }
+    }
+  },
+  {
+    "workers": 16,
+    "repetition": 2,
+    "commit": "6915f6764190a3557251870de1b4dcb692a0f6bb",
+    "project": "ffp9-20261005101117-71db5bc7",
+    "summary": {
+      "jobs": 500,
+      "submit_requests": 500,
+      "submit_errors": 0,
+      "completed": 500,
+      "succeeded": 500,
+      "failed": 0,
+      "dead_letter": 0,
+      "cancelled": 0,
+      "timed_out": 0,
+      "unfinished": 0,
+      "poll_errors": 0,
+      "wall_seconds": 6.355706499,
+      "throughput_jobs_per_second": 78.66946028402499,
+      "submit_error_rate": 0,
+      "terminal_error_rate": 0,
+      "error_rate": 0,
+      "queue_latency": {
+        "p50_seconds": 5.735811,
+        "p95_seconds": 6.149474,
+        "p99_seconds": 6.218448
+      },
+      "end_to_end_latency": {
+        "p50_seconds": 5.76266,
+        "p95_seconds": 6.176313,
+        "p99_seconds": 6.245186
+      }
+    }
+  },
+  {
+    "workers": 16,
+    "repetition": 3,
+    "commit": "6915f6764190a3557251870de1b4dcb692a0f6bb",
+    "project": "ffp9-20261005101148-8220d46d",
+    "summary": {
+      "jobs": 500,
+      "submit_requests": 500,
+      "submit_errors": 0,
+      "completed": 500,
+      "succeeded": 500,
+      "failed": 0,
+      "dead_letter": 0,
+      "cancelled": 0,
+      "timed_out": 0,
+      "unfinished": 0,
+      "poll_errors": 0,
+      "wall_seconds": 31.271776014,
+      "throughput_jobs_per_second": 15.988858444629303,
+      "submit_error_rate": 0,
+      "terminal_error_rate": 0,
+      "error_rate": 0,
+      "queue_latency": {
+        "p50_seconds": 7.262195,
+        "p95_seconds": 30.834798,
+        "p99_seconds": 31.117184
+      },
+      "end_to_end_latency": {
+        "p50_seconds": 7.289161,
+        "p95_seconds": 30.862015,
+        "p99_seconds": 31.144103
+      }
+    }
+  }
+]
