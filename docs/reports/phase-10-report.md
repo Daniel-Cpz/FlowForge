@@ -14,7 +14,11 @@ Execution ID: phase-10-20261005T104953Z. Started UTC2026-10-05T10:49:53Z.
 Prompt source automation: automation/prompts/phase-10.md, fully read (779 lines).
 External handoff2753feb reviewed Phase9 checkpoint718e9c2/tag before claim.
 Ownership378658ca14205234d3b7437a53cedd980619b96d was pushed/reread before code.
-User explicitly selected Private SSH-tunnel mode; no cloud host/user was supplied.
+User explicitly selected Private SSH-tunnel mode and confirmed no deployment target
+is prepared or authorized. No authorized VPS/EC2 deployment target is currently available.
+No real host, SSH user/port or deployment secrets are available; cloud/SSH acceptance
+is BLOCKED / NOT EXECUTED. Resume only after authorized target and protected
+flowforge-cloud Environment/key/trusted known_hosts setup, preserving safety gates.
 
 ## Summary
 
@@ -51,6 +55,11 @@ historical migrations/reports/prompts/tags are unchanged. No Phase11 is generate
   pinned known_hosts, runner key cleanup and ephemeral remote registry login.
 - Deployment runbook, ADR0011 and architecture/Dashboard/observability/operations/
   roadmap/README/index updates distinguish local implementation from cloud gates.
+- Deployment preserves previous.env before replacing current.env, allowing the
+  operator to inspect earlier immutable image references. Backup names use the
+  actual deployed SHA, or bootstrap before the first deployment.
+- Graceful shutdown integration waits for completed registration/queue receive
+  before cancellation, and checks persisted OFFLINE/graceful_shutdown state.
 
 ## Not Implemented
 
@@ -78,6 +87,8 @@ host summary, then finalize report/checkpoint/annotated tag/state. No Phase11 pl
 |---|---|
 | sh scripts/check.sh | PASS: gofmt, state, vet, all Go tests/build; integration24.708s |
 | go test -race -count=1 realtime/observability/infrastructure/service/transport/integration | PASS; integration25.558s |
+| Graceful shutdown fix: go test -race -count=20 -run TestWorkerGracefulIdleAndSleepShutdown ./tests/integration | PASS 6.175s |
+| Full Go check + same broad race suite after shutdown synchronization fix | PASS; full integration21.413s, race integration24.626s |
 | Frontend npm ci/typecheck/16 tests (3 files)/production build | PASS Node24 Docker, Vite static dist |
 | Backend/gateway/tools builds | PASS; backend USER flowforge and OCI revision verified |
 | Bash syntax + state-machine.sh | PASS eight abort paths, successful atomic metadata, concurrency/permission gates |
@@ -128,6 +139,15 @@ can change a random fixture port after restart, so test re-discovers it (real
 private deployment uses fixed8180). The first shell fixture accidentally copied
 the whole repo; narrowed to deploy/ and fixed its canonical temporary path.
 No business scheduling/migration behavior was changed to make tests pass.
+
+The [first real GitHub CI run](https://github.com/Daniel-Cpz/FlowForge/actions/runs/37303236874)
+at implementation checkpoint151d1f1 passed the full
+Go check, then failed the race suite in TestWorkerGracefulIdleAndSleepShutdown/idle
+(worker registration failed). A fixed30ms delay allowed cancellation during the
+registration query on a loaded runner. The test now synchronizes on queue Receive,
+which starts after registration returns; it retains bounded shutdown/active retry
+assertions and also checks persisted graceful shutdown. Repeated local race
+validation (20 runs) PASS. Remote verification is recorded below when complete.
 
 ## Known Limitations
 

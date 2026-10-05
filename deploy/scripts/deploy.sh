@@ -23,6 +23,7 @@ cleanup() {
     fi
   fi
   rm -f -- "$FLOWFORGE_HOME/current.env.partial"
+  rm -f -- "$FLOWFORGE_HOME/previous.env.partial"
   flock -u 9 || true
   exit "$rc"
 }
@@ -33,6 +34,13 @@ docker info >/dev/null; docker compose version >/dev/null
 [[ -s $FLOWFORGE_HOME/secrets/postgres/server.crt && -s $FLOWFORGE_HOME/secrets/postgres/server.key ]] || fail 'bootstrap TLS files missing'
 [[ $(stat -c %a "$FLOWFORGE_HOME/secrets/postgres/server.key") == 600 ]] || fail 'TLS key must be mode 0600'
 dc config --quiet
+if [[ -e $FLOWFORGE_HOME/current.env ]]; then
+  [[ -f $FLOWFORGE_HOME/current.env && ! -L $FLOWFORGE_HOME/current.env && $(stat -c %a "$FLOWFORGE_HOME/current.env") == 600 ]] || fail 'invalid previous release record'
+  # Keep previous image refs even after a successful current.env replacement.
+  cp -- "$FLOWFORGE_HOME/current.env" "$FLOWFORGE_HOME/previous.env.partial"
+  chmod 600 "$FLOWFORGE_HOME/previous.env.partial"
+  mv -- "$FLOWFORGE_HOME/previous.env.partial" "$FLOWFORGE_HOME/previous.env"
+fi
 step=pull
 dc pull
 for image in "$FLOWFORGE_BACKEND_IMAGE" "$FLOWFORGE_GATEWAY_IMAGE"; do

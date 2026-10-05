@@ -6,6 +6,7 @@ fixture=$(mktemp -d /tmp/flowforge-deploy-test-XXXXXXXX)
 trap 'rm -rf -- "$fixture"' EXIT
 mkdir -p "$fixture/bin" "$fixture/home/secrets/postgres" "$fixture/home/releases"
 sha=$(printf a%.0s {1..40}); digest=$(printf b%.0s {1..64})
+previous_sha=$(printf e%.0s {1..40})
 release="$fixture/home/releases/$sha"
 cp -R "$root" "$release"
 printf 'fixture\n' > "$fixture/home/secrets/postgres/server.key"
@@ -52,11 +53,14 @@ export PATH="$fixture/bin:$PATH" FIXTURE_LOG="$fixture/log" FIXTURE_SHA="$sha"
 run() { bash "$release/scripts/deploy.sh" "$fixture/env" "$sha" "ghcr.io/daniel-cpz/flowforge-backend@sha256:$digest" "ghcr.io/daniel-cpz/flowforge-gateway@sha256:$digest"; }
 for case in preflight pull gateway-config backup migration readiness gateway gateway-route; do
   export FIXTURE_CASE=$case
-  printf 'previous-release-preserved\n' > "$fixture/home/current.env"
+  printf 'FLOWFORGE_RELEASE_SHA=%s\n' "$previous_sha" > "$fixture/home/current.env"
+  cp "$fixture/home/current.env" "$fixture/expected"
+  chmod 600 "$fixture/home/current.env"
   : > "$FIXTURE_LOG"
   if run > "$fixture/output" 2>&1; then echo "unexpected success: $case"; exit 1; fi
-  grep -qx previous-release-preserved "$fixture/home/current.env"
+  cmp "$fixture/expected" "$fixture/home/current.env"
   [[ ! -e $fixture/home/current.env.partial ]]
+  [[ ! -e $fixture/home/previous.env.partial ]]
   ! grep -q 'migrate down\| down\|--volumes' "$FIXTURE_LOG"
   # flock released after both early and post-drain failures.
   flock -n "$fixture/home/deploy.lock" true
@@ -66,9 +70,13 @@ done
 export FIXTURE_CASE=success
 run > "$fixture/output" 2>&1
 grep -qx "FLOWFORGE_RELEASE_SHA=$sha" "$fixture/home/current.env"
+cmp "$fixture/expected" "$fixture/home/previous.env"
 [[ $(stat -c %a "$fixture/home/current.env") == 600 ]]
+[[ $(stat -c %a "$fixture/home/previous.env") == 600 ]]
+compgen -G "$fixture/home/backups/*-$previous_sha-*.dump" >/dev/null
+! compgen -G "$fixture/home/backups/*-$sha-*.dump" >/dev/null
 flock -n "$fixture/home/deploy.lock" true
-printf '%s\n' 'PASS successful atomic record'
+printf '%s\n' 'PASS atomic current record / previous references / deployed-SHA backup'
 # Contention gate before Docker and malformed credential gate.
 : > "$FIXTURE_LOG"
 if flock "$fixture/home/deploy.lock" bash -c 'bash "$1" "$2" "$3" "$4" "$5"' _ "$release/scripts/deploy.sh" "$fixture/env" "$sha" "ghcr.io/daniel-cpz/flowforge-backend@sha256:$digest" "ghcr.io/daniel-cpz/flowforge-gateway@sha256:$digest" > "$fixture/output" 2>&1; then exit 1; fi

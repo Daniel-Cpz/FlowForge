@@ -410,6 +410,17 @@ func TestClaimAndFinalizeDatabaseFailures(t *testing.T) {
 	}
 }
 
+type shutdownReadyQueue struct {
+	execution.Queue
+	once  sync.Once
+	ready chan struct{}
+}
+
+func (q *shutdownReadyQueue) Receive(ctx context.Context, consumer string) (*job.Delivery, error) {
+	q.once.Do(func() { close(q.ready) })
+	return q.Queue.Receive(ctx, consumer)
+}
+
 func TestWorkerGracefulIdleAndSleepShutdown(t *testing.T) {
 	for _, active := range []bool{false, true} {
 		t.Run(map[bool]string{false: "idle", true: "sleep"}[active], func(t *testing.T) {
@@ -426,7 +437,17 @@ func TestWorkerGracefulIdleAndSleepShutdown(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
 			done := make(chan error, 1)
-			go func() { done <- execution.New(repo, q, execution.Sleep{}, testLogger()).Run(ctx) }()
+			readyQueue := &shutdownReadyQueue{Queue: q, ready: make(chan struct{})}
+			go func() { done <- execution.New(repo, readyQueue, execution.Sleep{}, testLogger()).Run(ctx) }()
+			// Receive is entered only after registration succeeds. A fixed sleep
+			// can cancel the registration query on a loaded race-test runner.
+			select {
+			case <-readyQueue.ready:
+			case err := <-done:
+				t.Fatalf("worker stopped before receiving: %v", err)
+			case <-time.After(3 * time.Second):
+				t.Fatal("worker did not start receiving")
+			}
 			if active {
 				deadline := time.Now().Add(3 * time.Second)
 				for {
@@ -442,8 +463,6 @@ func TestWorkerGracefulIdleAndSleepShutdown(t *testing.T) {
 					}
 					time.Sleep(5 * time.Millisecond)
 				}
-			} else {
-				time.Sleep(30 * time.Millisecond)
 			}
 			cancel()
 			select {
@@ -453,6 +472,10 @@ func TestWorkerGracefulIdleAndSleepShutdown(t *testing.T) {
 				}
 			case <-time.After(3 * time.Second):
 				t.Fatal("shutdown did not complete")
+			}
+			var status, reason string
+			if err := pool.QueryRow(t.Context(), `SELECT status,offline_reason FROM workers`).Scan(&status, &reason); err != nil || status != "OFFLINE" || reason != "graceful_shutdown" {
+				t.Fatal("graceful worker shutdown not persisted", status, reason, err)
 			}
 			if active {
 				got, err := repo.GetByID(t.Context(), j.ID)

@@ -74,7 +74,7 @@ a required strong password/private port and no TLS on this single host; reassess
 transport encryption before moving to multiple hosts.
 
 Server layout: `.env.prod`, `secrets/postgres/`, `backups/`, `releases/<full SHA>/`,
-`deploy.lock`, `current.env`. Restrict parent directories. No Git clone/server
+`deploy.lock`, `current.env`, `previous.env`. Restrict parent directories. No Git clone/server
 build, private key/hash/token/archive or volume data in Git/Actions logs.
 
 ## CI, GHCR and protected deployment
@@ -147,7 +147,8 @@ intentional compose stop needs up-d to resume. Restart never runs migrations.
 
 Run `backup.sh /opt/flowforge/.env.prod DEPLOYED_SHA` from the current bundle.
 Same lock; pg_dump-Fc, pg_restore--list, atomic rename/mode0600, UTC+SHA+PID name;
-keep newest7 complete dumps. Backup failure aborts before migration and removes
+keep newest7 complete dumps. Pre-migration archives use the actual previous
+deployed SHA; first-install archives explicitly use bootstrap. Backup failure aborts before migration and removes
 only partial archive. These are logical local backups, not off-host disaster
 recovery; separately arrange protected off-host copies/retention.
 

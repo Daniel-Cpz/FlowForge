@@ -71,7 +71,11 @@ acquire_lock() {
 }
 schema_version() { dc exec -T postgres psql -U flowforge -d flowforge -Atc 'SELECT max(version) FROM schema_migrations'; }
 backup_database() {
-  local directory="$FLOWFORGE_HOME/backups" sha=${FLOWFORGE_RELEASE_SHA:-bootstrap} target
+  local directory="$FLOWFORGE_HOME/backups" sha=bootstrap target
+  if [[ -f $FLOWFORGE_HOME/current.env && ! -L $FLOWFORGE_HOME/current.env ]]; then
+    sha=$(sed -n 's/^FLOWFORGE_RELEASE_SHA=//p' "$FLOWFORGE_HOME/current.env")
+    [[ $sha =~ ^[a-f0-9]{40}$ ]] || fail 'invalid deployed revision for backup'
+  fi
   [[ ! -L $directory ]] || fail 'backup directory is a symlink'
   target="$directory/$(date -u +%Y%m%dT%H%M%SZ)-$sha-$$.dump"
   if ! dc exec -T postgres pg_dump -U flowforge -d flowforge -Fc > "$target.partial"; then

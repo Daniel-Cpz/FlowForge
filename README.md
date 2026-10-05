@@ -469,7 +469,7 @@ Phase 1 delivers **Job Persistence + API Correctness**. Phase 2 implements
 **Redis Queue + Single Worker Execution** with a durable database outbox.
 Phase 3 implements **Multiple Workers + Bounded Concurrency**.
 Phase 4 implements **Heartbeat + Lease + Crash Recovery**.
-Phase 5 implements **Retry + Backoff + Jitter + Submission Idempotency**. Phase 6 implements **Priority + Execution Timeout + User Cancellation + Dead Letter Management**. Phase 7 implements **DB-time Delayed Jobs + Capability-aware Claim + Fixed-interval Recurring Schedules**. Phase 8 implements **React/TypeScript Dashboard + transient WebSocket hints + REST resync**. Phase 9 implements **bounded metrics/tracing, isolated failure injection and repeated local benchmarks**. Phase 10 deployment remains Planned and requires external review and a prepared prompt.
+Phase 5 implements **Retry + Backoff + Jitter + Submission Idempotency**. Phase 6 implements **Priority + Execution Timeout + User Cancellation + Dead Letter Management**. Phase 7 implements **DB-time Delayed Jobs + Capability-aware Claim + Fixed-interval Recurring Schedules**. Phase 8 implements **React/TypeScript Dashboard + transient WebSocket hints + REST resync**. Phase 9 implements **bounded metrics/tracing, isolated failure injection and repeated local benchmarks**. Phase 10 implements local production infrastructure and CI/CD workflows; actual cloud deployment acceptance is BLOCKED.
 See the [Phase 0–10 roadmap](docs/development-roadmap.md) and authoritative phase state.
 The [Phase 1 report](docs/reports/phase-1-report.md) records its validation and Git checkpoint.
 The [Phase 2 report](docs/reports/phase-2-report.md) records execution/durability evidence.
@@ -573,6 +573,12 @@ from real cloud acceptance: authorized host/Environment and successful release/
 deploy/cloud smoke evidence remain required. Default2 Workers/C1 reflects Phase9
 benchmark limits. Retained schema4 DB is untouched; main is not merged. Phase10
 is the final numbered roadmap phase; no Phase11 is generated.
+
+**BLOCKED: No authorized VPS/EC2 deployment target is currently available.**
+The user confirmed that no host, SSH user or deployment secrets are prepared or
+authorized. Actual SSH/cloud acceptance is NOT EXECUTED. Resume after an authorized
+target and the `flowforge-cloud` Environment, SSH key and trusted `known_hosts`
+are configured; preserve strict host verification.
 
 ## License
 
