@@ -100,6 +100,10 @@ commitment was found. `offset` now returns 400.
 | POST | `/api/v1/schedules` | Fixed-interval template; 201 + Location |
 | GET | `/api/v1/schedules/{id}` | Schedule by UUID; 404 SCHEDULE_NOT_FOUND |
 | POST | `/api/v1/schedules/{id}/cancel` | Idempotent future-occurrence cancellation; existing Jobs continue |
+| GET | `/api/v1/dashboard/summary` | One PG statement: job/worker/schedule counts and due QUEUED depth |
+| GET | `/api/v1/workers?limit=20&cursor=...` | Bounded immutable worker UUID DESC pages |
+| GET | `/api/v1/schedules?limit=20&cursor=...` | Bounded `(created_at DESC, id DESC)` pages |
+| GET | `/api/v1/ws` | Bounded transient UI invalidation hints; reconnect requires REST snapshot |
 
 | Create field | Missing | Explicit null | Supplied value |
 |---|---|---|---|
@@ -436,6 +440,12 @@ outbox history have no automatic retention/cleanup yet. All ports bind to loopba
 - Fixed-interval templates, atomic bounded occurrence materialization and deduplication
 - Coalesced missed runs, independent schedule/Job cancellation and crash/race validation
 - Phase 7 isolated two-worker API/process smoke with retained-data audit
+- React/TypeScript Overview, Jobs, detail/Attempts, Workers, Schedules and DLQ
+- Server-authoritative REST cancel/redrive with confirmation and conflict feedback
+- Versioned WebSocket hints with separate multi-process Redis Pub/Sub fanout
+- Bounded producer/client buffers, origin/read/idle limits and joined shutdown
+- Reconnect snapshots and 30-second reconciliation of current visible resources
+- Frontend component/reconnect tests and isolated two-API/two-worker/Vite smoke
 
 ### Experimental
 
@@ -443,8 +453,8 @@ None. SLEEP crash recovery is tested; production hardening remains planned.
 
 ### Planned
 
-Cron, schedule edit/pause/resume, capability routing, priority aging, persistent per-job logs, DLQ UI,
-dashboard, metrics/tracing, failure injection, benchmarking and cloud deployment.
+Cron, schedule edit/pause/resume, capability routing, priority aging, persistent per-job logs,
+metrics/tracing, systematic failure injection, benchmarking and cloud deployment.
 
 ## Roadmap
 
@@ -452,7 +462,7 @@ Phase 1 delivers **Job Persistence + API Correctness**. Phase 2 implements
 **Redis Queue + Single Worker Execution** with a durable database outbox.
 Phase 3 implements **Multiple Workers + Bounded Concurrency**.
 Phase 4 implements **Heartbeat + Lease + Crash Recovery**.
-Phase 5 implements **Retry + Backoff + Jitter + Submission Idempotency**. Phase 6 implements **Priority + Execution Timeout + User Cancellation + Dead Letter Management**. Phase 7 implements **DB-time Delayed Jobs + Capability-aware Claim + Fixed-interval Recurring Schedules**. Phase 8 Dashboard/WebSocket remains Planned and requires external review and a prepared prompt.
+Phase 5 implements **Retry + Backoff + Jitter + Submission Idempotency**. Phase 6 implements **Priority + Execution Timeout + User Cancellation + Dead Letter Management**. Phase 7 implements **DB-time Delayed Jobs + Capability-aware Claim + Fixed-interval Recurring Schedules**. Phase 8 implements **React/TypeScript Dashboard + transient WebSocket hints + REST resync**. Phase 9 observability remains Planned and requires external review and a prepared prompt.
 See the [Phase 0–10 roadmap](docs/development-roadmap.md) and authoritative phase state.
 The [Phase 1 report](docs/reports/phase-1-report.md) records its validation and Git checkpoint.
 The [Phase 2 report](docs/reports/phase-2-report.md) records execution/durability evidence.
@@ -461,6 +471,7 @@ The [Phase 4 report](docs/reports/phase-4-report.md) records lease/fencing/recov
 The [Phase 5 report](docs/reports/phase-5-report.md) records retry/idempotency/migration evidence.
 The [Phase 6 report](docs/reports/phase-6-report.md) records scheduling/control/DLQ evidence.
 The [Phase 7 report](docs/reports/phase-7-report.md) records delayed/capability/recurring evidence.
+The [Phase 8 report](docs/reports/phase-8-report.md) records Dashboard/realtime/resync evidence.
 This repository does not claim exactly-once execution. Delivery is at-least-once;
 business side effects need their own idempotency safeguards.
 
@@ -486,7 +497,7 @@ phase report and real Git evidence pass their gates. The separate infrastructure
 report does not complete Phase 1.
 
 FlowForge supports both manual and automation-generated phase prompts. The
-current Phase 7 prompt is `automation`, at `automation/prompts/phase-7.md`.
+current Phase 8 prompt is `automation`, at `automation/prompts/phase-8.md`.
 Phase 1 used manual input, with no prompt file required.
 Automated prompts must have an existing current-phase file.
 `prompt_path` tracks the current phase's source; `next_prompt` tracks an externally
@@ -496,6 +507,27 @@ silently change a phase already in progress. Full rules are in the protocol.
 
 Validate with `go run ./scripts/validate-phase-state`; run focused tests with
 `go test -count=1 ./scripts/validate-phase-state` or the matching Make targets.
+
+## Dashboard (local/demo)
+
+The React/TypeScript Dashboard reads REST/PostgreSQL snapshots. WebSocket hints
+use a separate `<FLOWFORGE_REDIS_STREAM>:ui:v1` Pub/Sub channel. Reconnection and
+30-second reconciliation refresh visible resources; hints never deliver tasks
+or rebuild authoritative state. Queue depth counts due QUEUED Jobs with budget,
+including jobs without a matching capability Worker. Phase 9 metrics remain planned.
+
+Use Node 24: `cd web && npm ci && npm run dev`, with a compatible API on 8080.
+Vite proxies REST and WS. On a **fresh compatible DB**,
+`docker compose --profile dashboard up --build` starts the local frontend too.
+The retained development DB remains schema 4 with one legacy duplicate-key group;
+do not run that upgrade command against it. `./scripts/phase8-smoke.ps1` creates,
+tests and removes its own compatible DB/stream/channel and containers instead.
+It uses real WS clients; browser E2E is NOT RUN.
+
+This control plane has no authentication and is intended for loopback/local
+demonstration. Reassess auth/TLS/origins before public deployment in Phase 10.
+See [Dashboard contract](docs/dashboard.md), [frontend setup](web/README.md) and
+[ADR 0009](docs/decisions/0009-dashboard-realtime-resync.md).
 
 ## License
 

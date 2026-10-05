@@ -126,6 +126,7 @@ func (r *JobRepository) Claim(ctx context.Context, id, worker uuid.UUID) (*job.J
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
+	r.changed("job.changed", j.ID, string(j.Status))
 	return j, nil
 }
 
@@ -169,6 +170,7 @@ func (r *JobRepository) Finalize(ctx context.Context, j *job.Job, status job.Sta
 		return err
 	}
 	*j = *stored
+	r.changed("job.changed", j.ID, string(j.Status))
 	return nil
 }
 

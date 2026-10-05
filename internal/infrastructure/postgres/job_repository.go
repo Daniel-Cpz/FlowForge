@@ -15,10 +15,23 @@ import (
 )
 
 type JobRepository struct {
+	observe     func(string, uuid.UUID, string)
 	pool        *pgxpool.Pool
 	leasePolicy worker.LeasePolicy
 	retryPolicy retry.Policy
 	jitter      retry.Jitter
+}
+
+// ObserveChanges is configured once by the composition root before concurrent use.
+// The callback must be nonblocking; it never participates in the transaction.
+func (r *JobRepository) ObserveChanges(fn func(string, uuid.UUID, string)) *JobRepository {
+	r.observe = fn
+	return r
+}
+func (r *JobRepository) changed(kind string, id uuid.UUID, status string) {
+	if r.observe != nil {
+		r.observe(kind, id, status)
+	}
 }
 
 var _ job.Repository = (*JobRepository)(nil)
@@ -98,6 +111,9 @@ func (r *JobRepository) Create(ctx context.Context, j *job.Job) (job.CreateDispo
 		return "", fmt.Errorf("commit create: %w", err)
 	}
 	*j = *stored
+	if disposition == job.Created {
+		r.changed("job.changed", j.ID, string(j.Status))
+	}
 	return disposition, nil
 }
 

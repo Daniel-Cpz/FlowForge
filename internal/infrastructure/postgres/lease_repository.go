@@ -34,19 +34,31 @@ func (r *JobRepository) RegisterWorkerCapabilities(ctx context.Context, id uuid.
 	if result.RowsAffected() != 1 {
 		return worker.ErrOffline
 	}
+	r.changed("worker.changed", id, "ONLINE")
 	return nil
 }
 func (r *JobRepository) Heartbeat(ctx context.Context, id uuid.UUID, active int) error {
 	ctx, cancel := context.WithTimeout(ctx, min(3*time.Second, r.leasePolicy.HeartbeatInterval))
 	defer cancel()
-	result, err := r.pool.Exec(ctx, `UPDATE workers SET status=CASE WHEN $2=0 THEN 'IDLE' ELSE 'BUSY' END,
- last_heartbeat=clock_timestamp(),active_jobs=$2 WHERE worker_id=$1 AND status IN ('ONLINE','IDLE','BUSY')
- AND last_heartbeat>clock_timestamp()-make_interval(secs=>$3)`, id, active, r.leasePolicy.OfflineAfter.Seconds())
+	var changed bool
+	err := r.pool.QueryRow(ctx, `WITH previous AS (SELECT worker_id,status,active_jobs FROM workers WHERE worker_id=$1
+ AND status IN ('ONLINE','IDLE','BUSY') AND last_heartbeat>clock_timestamp()-make_interval(secs=>$3) FOR UPDATE)
+ UPDATE workers w SET status=CASE WHEN $2=0 THEN 'IDLE' ELSE 'BUSY' END,last_heartbeat=clock_timestamp(),active_jobs=$2
+ FROM previous p WHERE w.worker_id=p.worker_id AND w.status IN ('ONLINE','IDLE','BUSY')
+ AND w.last_heartbeat>clock_timestamp()-make_interval(secs=>$3)
+ RETURNING p.active_jobs<>$2 OR p.status<>CASE WHEN $2=0 THEN 'IDLE' ELSE 'BUSY' END`, id, active, r.leasePolicy.OfflineAfter.Seconds()).Scan(&changed)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return worker.ErrOffline
+	}
 	if err != nil {
 		return err
 	}
-	if result.RowsAffected() != 1 {
-		return worker.ErrOffline
+	if changed {
+		status := "IDLE"
+		if active > 0 {
+			status = "BUSY"
+		}
+		r.changed("worker.changed", id, status)
 	}
 	return nil
 }
@@ -56,6 +68,9 @@ func (r *JobRepository) MarkDraining(ctx context.Context, id uuid.UUID) error {
 	result, err := r.pool.Exec(ctx, `UPDATE workers SET status='DRAINING',last_heartbeat=clock_timestamp() WHERE worker_id=$1 AND status<>'OFFLINE'`, id)
 	if err == nil && result.RowsAffected() != 1 {
 		return worker.ErrOffline
+	}
+	if err == nil {
+		r.changed("worker.changed", id, "DRAINING")
 	}
 	return err
 }
@@ -69,6 +84,9 @@ func (r *JobRepository) StopWorker(ctx context.Context, id uuid.UUID, reason str
  WHERE worker_id=$1 AND status<>'OFFLINE'`, id, reason)
 	if err == nil && result.RowsAffected() != 1 {
 		return worker.ErrOffline
+	}
+	if err == nil {
+		r.changed("worker.changed", id, "OFFLINE")
 	}
 	return err
 }
@@ -118,7 +136,14 @@ func (r *JobRepository) DetectOffline(ctx context.Context, limit int) ([]uuid.UU
 		}
 		ids = append(ids, id)
 	}
-	return ids, rows.Err()
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, id := range ids {
+		r.changed("worker.changed", id, "OFFLINE")
+	}
+	return ids, nil
 }
 
 // Recovery closes expired Attempts through the same budget and backoff policy.
@@ -164,6 +189,9 @@ func (r *JobRepository) RecoverExpired(ctx context.Context, limit int) ([]job.Re
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
+	}
+	for _, v := range recovered {
+		r.changed("job.changed", v.JobID, string(v.Status))
 	}
 	return recovered, nil
 }
@@ -217,6 +245,9 @@ func (r *JobRepository) PromoteRetries(ctx context.Context, limit int) ([]uuid.U
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
+	}
+	for _, id := range ids {
+		r.changed("job.changed", id, "QUEUED")
 	}
 	return ids, nil
 }

@@ -21,3 +21,4 @@ substitute for phase completion.
 - [Phase 5 — Budgeted retries and submission idempotency](phase-5-report.md)
 - [Phase 6 — Priority, timeout, user cancellation and DLQ](phase-6-report.md)
 - [Phase 7 — Delayed Jobs, capability-aware Claim and recurring schedules](phase-7-report.md)
+- [Phase 8 — Dashboard, WebSocket fanout and REST resync](phase-8-report.md)

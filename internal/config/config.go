@@ -15,6 +15,7 @@ import (
 )
 
 type Config struct {
+	WSOrigins          string
 	WorkerCapabilities []string
 	Env                string
 	HTTPAddr           string
@@ -42,6 +43,19 @@ func Load() (Config, error) {
 		RedisStream: value("FLOWFORGE_REDIS_STREAM", "flowforge:jobs:v1")}
 	concurrency := value("FLOWFORGE_WORKER_CONCURRENCY", "1")
 	var err error
+	c.WSOrigins = value("FLOWFORGE_WS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
+	if c.WSOrigins != "" {
+		origins := strings.Split(c.WSOrigins, ",")
+		if len(origins) > 8 {
+			return c, fmt.Errorf("invalid FLOWFORGE_WS_ORIGINS")
+		}
+		for _, raw := range origins {
+			u, e := url.Parse(raw)
+			if e != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || strings.Contains(raw, "*") {
+				return c, fmt.Errorf("invalid FLOWFORGE_WS_ORIGINS")
+			}
+		}
+	}
 	c.WorkerCapabilities, err = capability.ParseConfig(value("FLOWFORGE_WORKER_CAPABILITIES", ""))
 	if err != nil {
 		return c, fmt.Errorf("invalid FLOWFORGE_WORKER_CAPABILITIES")

@@ -12,3 +12,6 @@ volumes
 .agents
 .aws
 .ssh
+**/node_modules
+**/dist
+**/coverage

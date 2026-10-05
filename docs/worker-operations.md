@@ -201,3 +201,20 @@ Migration 000007 appends to unchanged 000001–000006 and does not bypass the
 legacy duplicate-key preflight. Down loses schedule/capability/attribution
 metadata, retaining Jobs/Attempts; stop processes before schema changes.
 See [contract](scheduling.md) and [ADR 0008](decisions/0008-time-capabilities-recurring-schedules.md).
+
+## Dashboard and UI notification degradation
+
+The Phase 8 Dashboard exposes PG Worker status, capabilities, C, active count
+and heartbeat. OFFLINE rows may retain historical active count; summary excludes
+OFFLINE. Status/count changes emit hints; unchanged heartbeat/renewal does not.
+Visible resources reconcile every 30s and on reconnect.
+
+UI publishing uses separate `<stream>:ui:v1` Pub/Sub. `ui_hint_queue_full` and
+`ui_hint_publish_failed` warn of dropped hints without changing execution/commit
+or ACK. REST remains the authority when realtime is DEGRADED. Recovered subscriptions
+request snapshots. Slow WS clients disconnect/retry with bounded backoff.
+
+`./scripts/phase8-smoke.ps1` runs two APIs/two C=1 Workers/Vite in generated
+resources; verifies kill/recovery, missed-event resync, DLQ history/redrive and
+scoped cleanup. Retained schema 4 is audited unchanged; do not deploy these
+new binaries against that legacy DB. See [Dashboard contract](dashboard.md).

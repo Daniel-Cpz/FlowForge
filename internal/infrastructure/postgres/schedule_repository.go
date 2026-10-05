@@ -54,6 +54,7 @@ func (r *JobRepository) CreateSchedule(ctx context.Context, v *schedule.Schedule
 		return err
 	}
 	*v = *stored
+	r.changed("schedule.changed", v.ID, v.Status)
 	return nil
 }
 func (r *JobRepository) GetSchedule(ctx context.Context, id uuid.UUID) (*schedule.Schedule, error) {
@@ -88,6 +89,7 @@ func (r *JobRepository) CancelSchedule(ctx context.Context, id uuid.UUID) (*sche
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
+	r.changed("schedule.changed", v.ID, v.Status)
 	return v, nil
 }
 
@@ -146,6 +148,12 @@ func (r *JobRepository) MaterializeDue(ctx context.Context, limit int) ([]uuid.U
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
+	}
+	for _, id := range ids {
+		r.changed("job.changed", id, "QUEUED")
+	}
+	for _, v := range candidates {
+		r.changed("schedule.changed", v.ID, "ACTIVE")
 	}
 	return ids, nil
 }

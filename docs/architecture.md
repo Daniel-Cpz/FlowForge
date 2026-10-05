@@ -1,6 +1,6 @@
 # Architecture
 
-Status: Phases 0–7 implemented. PostgreSQL is authoritative; Redis transports notifications.
+Status: Phases 0–8 implemented. PostgreSQL is authoritative; Redis transports notifications.
 
 ## Boundaries
 
@@ -12,7 +12,9 @@ define narrow infrastructure interfaces. Domain does not import SQL, Redis or HT
 
 Each process has C fixed slots (1..32), one dispatcher, one heartbeat and one
 maintenance loop, with at most C renewers. PostgreSQL/Redis connection limits
-are C+4 each for workers and 10 each for API. No unbounded prefetch or transaction
+are C+4 each for business worker traffic and 10 each for API. UI Pub/Sub uses a
+separate two-connection Redis pool/process, leaving business slots independent.
+No unbounded prefetch or transaction
 across SLEEP/Redis I/O exists. Consumers identify process UUID and slot.
 
 ## Submission and idempotency
@@ -114,7 +116,7 @@ Leases fence DB writes only; future executors need business-specific dedup/fenci
 
 Local development only: no authentication, tenant isolation, Redis TLS, admission
 control, priority aging, cron/editable schedules, persistent per-job logs,
-DLQ UI, metrics/tracing, benchmarks or deployment automation. Stream,
+metrics/tracing, benchmarks or deployment automation. Stream,
 consumer, outbox and key retention are unbounded. SLEEP remains the only production
 executor. See ADRs 0003–0008, lifecycle, worker operations and independent reports.
 
@@ -153,7 +155,7 @@ submission_max_attempts is persisted separately, preserving Phase 5 key identity
 and partial priority/DLQ indexes. DLQ pagination deliberately uses existing
 creation-time cursors, not a new completion-time encoding; Attempts history is
 bounded by the global 100-attempt budget. Error codes are sanitized; there is no
-persistent application-log subsystem, DLQ UI or authorization layer. Operator
+persistent application-log subsystem or authorization layer. Operator
 resolution of retained legacy duplicate keys remains required before 000005+.
 ## Phase 7 time, capabilities and recurring coordination
 
@@ -176,3 +178,30 @@ Append-only 000007 keeps historical migrations. Stop processes before up/down;
 down removes templates and scheduling/capability attribution metadata while
 retaining Jobs/Attempts. Retained development schema remains 4 with its legacy
 key conflict. See [contract](scheduling.md) and [ADR 0008](decisions/0008-time-capabilities-recurring-schedules.md).
+
+## Phase 8 Dashboard and transient fanout
+
+Dashboard reads have a domain read-model interface; PG supplies a single-statement
+summary and bounded lists, the service applies lookahead bounds, HTTP encodes
+cursors. Worker pages use immutable UUID DESC so heartbeat changes cannot move
+boundaries; Schedules use creation time/UUID DESC. Pages are live, not frozen.
+
+Composition configures a nonblocking observer before concurrent repository use.
+Create, Claim, Finalize, cancel/redrive, retry promotion/recovery, schedule
+create/cancel/materialization and Worker lifecycle changes enqueue hints after
+commit. Heartbeat captures previous status/count in its atomic update; unchanged
+heartbeats emit nothing. Lease renewal is repaired by low-frequency REST refresh.
+There is no Redis call under a business transaction/row lock.
+
+Each process has one 128-slot UI queue/publisher with 250ms Redis deadlines.
+Overflow/failure drops hints with sanitized warnings. Each API subscribes to the
+separate `<stream>:ui:v1` channel and owns a 100-connection hub: 16 messages/client,
+1 KiB event/read limits, 2s writes, 15s ping / 45s pong. Saturation disconnects
+slow peers; subscriber recovery emits a resync hint. Context cleanup closes the
+subscription socket, closes hijacked WS connections and joins all associated loops.
+
+React uses native fetch/WS and hash navigation. Hints refresh visible REST data,
+coalescing at 250ms; stale requests are aborted/discarded. Reconnect and a 30s
+repair interval restore snapshots after lost/duplicate/out-of-order hints.
+Controls show real REST results and refetch. Escaped collapsed JSON renders at
+most 16 KiB per field. See [contract](dashboard.md) and [ADR 0009](decisions/0009-dashboard-realtime-resync.md).

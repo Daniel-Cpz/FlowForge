@@ -1,8 +1,8 @@
 # Development roadmap
 
-Phases 0–7 are implemented: foundation, strict API/persistence, durable dispatch,
+Phases 0–8 are implemented: foundation, strict API/persistence, durable dispatch,
 SLEEP execution, multiple workers with bounded concurrency, DB-time lease recovery, budgeted retries/idempotency and priority/timeout/cancellation/DLQ controls.
-Phase 7 adds DB-time delayed Jobs, capability-aware Claim and fixed-interval recurring schedules. Phase 8 onward remains Planned. Authoritative completion status is in
+Phase 7 adds DB-time delayed Jobs, capability-aware Claim and fixed-interval recurring schedules. Phase 8 adds the React/TypeScript Dashboard, transient WebSocket fanout and REST resync. Phase 9 onward remains Planned. Authoritative completion status is in
 [`automation/state.json`](../automation/state.json). The whole-project
 [`README.md`](../README.md) and each independent report are required on completion.
 See the [protocol](phase-automation.md) and [report template](phase-report-template.md).
@@ -27,11 +27,12 @@ Phase 7 implements delayed time eligibility, immutable canonical Worker
 capabilities, per-worker eligible priority, and fixed-interval templates. Bounded
 PG transactions create a unique ordinary Job/intent and advance next_run_at;
 missed middle intervals are skipped. Schedule cancel leaves existing Jobs alone.
-Cron/edit/pause/resume, capability routing, priority aging and dashboard remain
-unimplemented. Phase 8 React/WebSocket remains Planned.
+Phase 8 exposes Overview, Jobs/detail/Attempts, Workers, Schedules and DLQ through
+REST, with transient WS hints and reconnect/30s repair. Cron/edit/pause/resume,
+capability routing, priority aging and performance observability remain planned.
 
-External Automation must consume the Phase 7 report and publish a legitimate
-next prompt before another phase starts. Codex has not generated that prompt or
-advanced last_processed_phase to 7. The next recommendation is roadmap context.
+External Automation must consume the Phase 8 report and publish a legitimate
+next prompt before another phase starts. Codex has not generated a Phase 9 prompt
+or advanced last_processed_phase to 8. The next recommendation is roadmap context.
 Retained duplicate-key data remains schema 4 pending separately authorized
 operator resolution; isolated schema-7 acceptance is not deployment or data repair.

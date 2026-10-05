@@ -44,6 +44,7 @@ func (r *JobRepository) Cancel(ctx context.Context, id uuid.UUID) (*job.Job, err
 	if err = tx.Commit(ctx); err != nil {
 		return nil, err
 	}
+	r.changed("job.changed", stored.ID, string(stored.Status))
 	return stored, nil
 }
 
@@ -73,6 +74,7 @@ func (r *JobRepository) RedriveDeadLetter(ctx context.Context, id uuid.UUID) (*j
 	if err = tx.Commit(ctx); err != nil {
 		return nil, err
 	}
+	r.changed("job.changed", stored.ID, string(stored.Status))
 	return stored, nil
 }
 

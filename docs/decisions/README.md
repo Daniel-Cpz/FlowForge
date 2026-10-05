@@ -27,3 +27,4 @@ Which simpler or different approaches were considered?
 - [0006 — Budgeted retries and submission idempotency](0006-budgeted-retries-and-submission-idempotency.md)
 - [0007 — Priority, attempt deadlines, cancellation and DLQ](0007-priority-timeout-cancellation-dlq.md)
 - [0008 — DB-time eligibility, immutable capabilities and recurring occurrences](0008-time-capabilities-recurring-schedules.md)
+- [0009 — Dashboard transient hints and authoritative REST resync](0009-dashboard-realtime-resync.md)
