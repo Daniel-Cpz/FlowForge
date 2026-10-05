@@ -6,7 +6,7 @@ Lease-based execution, at-least-once delivery, Worker crash recovery, retry with
 exponential backoff/jitter, DLQ, priority/capability-aware scheduling, scheduled
 Jobs, WebSocket Dashboard, Prometheus/Grafana, Docker, CI and failure testing.
 Production-like container acceptance is validated locally and in GitHub CI;
-real cloud deployment is optional. Phase 10 is completed; **v1.0.0 READY**;
+real cloud deployment is optional. Phase 10 is completed; **v1.0.0 Release Ready**;
 see [scope decision](docs/decisions/0012-v1-local-production-acceptance.md).
 
 ## Overview
@@ -604,7 +604,7 @@ See [deployment/runbook](docs/deployment.md), [bundle](deploy/README.md) and
 config/failure validation are verified; GHCR publication, real SSH/protected
 Environment deployment and cloud acceptance are not executed and are optional.
 Default2 Workers/C1 reflects Phase9
-benchmark limits. Retained schema4 DB is untouched; main is not merged. Phase10
+benchmark limits. Retained schema4 DB is untouched. Phase10
 is the final numbered roadmap phase; no Phase11 is generated.
 
 **Not deployed to a real VPS/EC2 by project scope decision.** ADR 0012 formally
@@ -613,9 +613,11 @@ report remains BLOCKED under its original scope. Any optional future deployment
 requires an authorized target, `flowforge-cloud` Environment, SSH key and trusted
 `known_hosts`; strict host verification and all safety gates remain intact.
 
-**v1.0.0 READY**, with full final regression evidence and completed phase state.
-This is readiness, not a published version tag. Main/version tag remain subject
-to external review and release decision, not an automatic part of finalization.
+**v1.0.0 Release Ready**. [Independent release review](docs/reports/v1.0.0-release-review.md)
+PASS; main CI, annotated tag and GitHub publication remain pending.
+[Release notes](docs/releases/v1.0.0.md) contain the complete version scope and limits.
+All release contents precede the immutable tag; actual publication status is
+recorded only after GitHub Release succeeds. No Phase 11.
 
 ## License
 

@@ -97,8 +97,8 @@ localStorage, fabricated logs, throughput or latency charts.
 
 ## Acceptance and local setup
 
-See [frontend setup](../web/README.md). Phase 8 adds no migration; use a schema-7
-API. Retained development schema 4 is not acceptance data and is not repaired or
+See [frontend setup](../web/README.md). Use the current schema-8 API for fresh
+v1 acceptance; Phase 8 itself added no migration. Retained development schema 4 is not acceptance data and is not repaired or
 upgraded. On a fresh DB only, Compose's dashboard profile starts the local stack.
 `./scripts/phase8-smoke.ps1` allocates a random DB/stream/channel and loopback ports,
 two APIs/two Workers/Vite, then removes only generated resources and audits retained

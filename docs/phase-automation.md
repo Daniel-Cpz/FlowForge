@@ -8,7 +8,10 @@ The current shared entry branch is `codex/phase1-api-correctness` in
 `Daniel-Cpz/FlowForge`, through owner-authorized Phase 10 finalization. Read state,
 README, report and prompt at one revision of that actual branch; do not guess
 branch names or assume default `main` contains phase state. `main` still contains
-Phase 0 until an explicitly authorized merge. Retaining this branch avoids a
+Phase 0 before the owner-authorized final release merge. The owner explicitly
+authorized release review, safe main merge and v1.0.0 publication on 2026-10-06;
+[review evidence](reports/v1.0.0-release-review.md) records the separate release
+gates. After verified publication, main is the shared source. Retaining this branch avoids a
 second competing state source; its historical name does not define current_phase.
 
 ## Independent documentation
@@ -174,4 +177,8 @@ execution completion. External Automation may record review of Phase 10 by
 advancing it to 10 with `next_prompt=null`; roadmap 0–10 is exhausted, so it must
 not generate Phase 11. Finalization publishes v1.0.0 READY on the shared branch;
 main merge and the annotated v1.0.0 release tag follow external review and an
-explicit final release decision. No cloud-named Phase 10 tag is required.
+explicit final release decision. The owner has now authorized that release task;
+its independent review is separate from GPT Automation report consumption and
+does not advance the counter. The phase tag remains null; the version tag pins
+the release commit, not the earlier phase-report checkpoint. No cloud-named
+Phase 10 tag is required. After release, no automatic next phase is permitted.

@@ -1,6 +1,6 @@
 # v1.0.0 release readiness
 
-Current status: **v1.0.0 READY**. Owner Phase 10 finalization and final standard
+Current status: **v1.0.0 Release Ready; RELEASE REVIEW: PASS**. Owner Phase 10 finalization and final standard
 [regression run37310265921](https://github.com/Daniel-Cpz/FlowForge/actions/runs/37310265921)
 PASS under ADR 0012; completed state pins the real report checkpoint.
 Read [state](../automation/state.json) and the exact
@@ -26,14 +26,30 @@ cloud claims, placeholder keys or relaxed host verification.
 
 ## Publication policy
 
-v1.0.0 READY means the revised engineering gates passed; it does not mean a
-GitHub Release, version tag, default-main merge or cloud deployment happened.
-The shared authoritative branch remains `codex/phase1-api-correctness`; its name
-does not define the phase. Repository protocol requires external review followed
-by an explicit final main/version release decision. Keep main and tags unchanged
-during this finalization; no `phase10-cloud-cicd` tag.
+The owner explicitly authorized independent review, main merge, annotated
+v1.0.0 and GitHub Release on 2026-10-06. The
+[review](reports/v1.0.0-release-review.md) independently checks the completed
+Phase 10 state/checkpoint, actual candidate CI, history, claims, tracked secrets/
+artifacts, docs and version policy. Its PASS permits the remaining publication
+gates; it does not mean GitHub publication or cloud deployment already happened.
 
-After review, fetch and check main ancestry/remote state before any authorized
-fast-forward or ordinary merge. Never force push, reset or rewrite history.
-If authorized to publish v1.0.0, use the existing annotated tag convention and
-verify its checkpoint and remote target. No formal Phase 11 is generated.
+Refresh refs/tags and clean-tree checks; prefer a normal fast-forward when main
+is an ancestor. Push/fetch/read back main and await actual main-push CI SUCCESS
+before tagging. No force push, reset, history rewrite or tag replacement. The
+annotated v1.0.0 uses message "FlowForge v1.0.0" and pins the final release
+commit; verify its remote object/target before publishing the non-draft GitHub
+Release titled "FlowForge v1.0.0" with the committed [notes](releases/v1.0.0.md).
+Re-read the published Release independently. Until that succeeds README stays
+Release Ready. A later publication receipt records the actual event/IDs and
+updates Released status only; it does not add missing release functionality or
+move the immutable tag. Main becomes the shared source after verified publication.
+
+The project version is the annotated tag/Release. The private frontend's 0.8.0
+package/lock version is component metadata; v1 API/Redis/WS/cursor fields are wire
+formats, not project version constants. Docker identity uses full source SHA and
+digests. No arbitrary version rewrites are needed. Phase state remains completed
+at its original report checkpoint, with null phase tag and next prompt; separate
+release evidence records the version tag. No Phase 11 or schema expansion.
+
+After publication, lifecycle is maintenance/portfolio and optional future work.
+Real VPS / AWS deployment is intentionally outside the required v1.0.0 scope and was not performed.

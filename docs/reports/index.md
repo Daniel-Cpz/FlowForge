@@ -6,6 +6,8 @@ manual Phase 10 uses `phase-10-completion.md` to preserve its historical progres
 [`automation/state.json`](../../automation/state.json) for the current report;
 never infer the phase from report ordering.
 
+- [v1.0.0 independent release review](v1.0.0-release-review.md)
+- [v1.0.0 release notes](../releases/v1.0.0.md)
 - [Report template](../phase-report-template.md)
 - [Automation protocol](../phase-automation.md)
 - [Automation infrastructure report](phase-automation-infrastructure-report.md)

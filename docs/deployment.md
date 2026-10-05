@@ -123,10 +123,11 @@ are echoed or persistently stored on the remote host.
 4. Approve Environment if configured; record successful deployment URL/evidence.
 
 GitHub requires the workflow_dispatch definition on the repository's default
-branch for dispatch eligibility. New workflows currently live on shared branch;
-main remains early foundation. If dispatch is unavailable, operator must explicitly
-authorize default-branch workflow setup or provide equivalent protected deployment
-evidence. Codex does not merge main as a workaround. See [GitHub manual workflow
+branch for dispatch eligibility. At Phase 10 finalization, new workflows lived
+only on the shared branch and main remained early foundation. The separate
+owner-authorized final release merges the reviewed workflows to main; publication
+does not dispatch image or cloud deployment workflows. Any later deployment
+requires its own authorized target and protected configuration. See [GitHub manual workflow
 docs](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow).
 
 ## Deploy sequence and rollback policy

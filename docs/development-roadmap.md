@@ -40,10 +40,12 @@ state. The owner subsequently removed cloud/SSH/GHCR/publication/deployment gate
 from v1.0.0 via [ADR 0012](decisions/0012-v1-local-production-acceptance.md).
 The separate [final completion evidence](reports/phase-10-completion.md) covers
 the new manual scope and successful final regression. Roadmap 0–10 is complete;
-no Phase 11 is generated. The version is ready, not yet published as a tag.
-Codex preserves last_processed_phase=9 and does not generate Phase11. After this
-final numbered phase, external review and an explicit operator decision are
-required for main merge/versioned release or further work.
+no Phase 11 is generated. The owner explicitly authorized final release on
+2026-10-06; [independent review](reports/v1.0.0-release-review.md) PASS.
+Version publication remains gated by main CI and the verified tag/Release.
+Phase state retains last_processed_phase=9 for the separate GPT Automation;
+release review is recorded independently. After publication, lifecycle is
+maintenance/portfolio; optional work requires a later owner decision.
 Retained duplicate-key data remains schema 4 pending separately authorized
 operator resolution; isolated schema-8 acceptance is not deployment or data repair.
 
