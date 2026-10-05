@@ -8,10 +8,7 @@ Phase 5
 
 COMPLETED
 
-Technical acceptance and final isolated real-service smoke PASS. This implementation
-checkpoint prepares Git fields without claiming its own SHA; claim state remains
-in_progress until implementation/tag publication and prospective completed-state
-validation pass. A metadata-only follow-up records the actual checkpoint/push.
+Technical acceptance, final isolated real-service smoke, implementation/tag push and prospective completed-state validation PASS. Claim stayed in_progress through checkpoint/tag publication. This metadata-only follow-up records the real checkpoint; publication of its state/report commit completes the handoff.
 
 ## Summary
 
@@ -197,12 +194,12 @@ normal API healthy/worker running and the original one duplicate-key group retai
 ## Git
 
 - Branch: codex/phase1-api-correctness.
-- Commit: pending implementation/report checkpoint; this file cannot embed its own SHA.
-- Tag: pending annotated phase5-retry-idempotency targeting that checkpoint.
-- GitHub Push Result: pending publication; claim already pushed/reread successfully.
+- Commit: 984014f7980c4205f60789974b39702dfc1770e6 (implementation/report checkpoint).
+- Tag: annotated phase5-retry-idempotency, verified locally/remotely to target that checkpoint.
+- GitHub Push Result: PASS. Implementation branch and annotated tag pushed atomically; remote branch/peeled tag match checkpoint; main unchanged. Completion metadata is published in the following state/report commit.
 - main remains the Phase 0 revision aa96182a037bfc502927125246e07733d0e8dbd3;
   no merge/force/history rewrite. No .env/credentials/binary/temp artifacts staged.
-- Completion state will preserve last_processed_phase=4 and next_prompt=null;
+- Prospective completion state validator: PASS with actual checkpoint/tag/report identity. Completion state preserves last_processed_phase=4 and next_prompt=null;
   report/path source remain automation/Phase 5. No false external consumption.
 
 ## Documentation Updated
