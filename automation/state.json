@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
   "project": "FlowForge",
-  "current_phase": 3,
-  "status": "completed",
-  "report": "docs/reports/phase-3-report.md",
-  "next_prompt": "automation/prompts/phase-4.md",
+  "current_phase": 4,
+  "status": "in_progress",
+  "report": null,
+  "next_prompt": null,
   "last_processed_phase": 3,
   "branch": "codex/phase1-api-correctness",
-  "commit": "cfe1988f3a6e5c3022464ee33fa18e4e1945aab3",
-  "tag": "phase3-multi-worker",
-  "updated_at": "2026-10-05T03:56:10Z",
+  "commit": null,
+  "tag": null,
+  "updated_at": "2026-10-05T04:00:22Z",
   "prompt_source": "automation",
-  "prompt_path": "automation/prompts/phase-3.md"
+  "prompt_path": "automation/prompts/phase-4.md"
 }
