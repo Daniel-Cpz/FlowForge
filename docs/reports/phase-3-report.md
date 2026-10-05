@@ -10,8 +10,9 @@ COMPLETED
 
 Technical acceptance, targeted tests and independent-process smoke PASS.
 Implementation/tag publication and final metadata evidence are recorded below;
-a checkpoint cannot contain its own SHA. State remains in_progress until Git
-publication gates complete, then the follow-up metadata commit records completion.
+a checkpoint cannot contain its own SHA. The claim state remained in_progress
+until checkpoint/tag publication gates
+passed; the follow-up metadata commit records the verified completed state.
 
 ## Summary
 
@@ -82,8 +83,8 @@ were available. `FLOWFORGE_INTEGRATION=1` was supplied by tools. Tests create a
 random PostgreSQL schema with current_schema checks on every connection and
 random Redis keys; no FLUSHDB/FLUSHALL or application-data deletion.
 
-Go subcommands below were executed in `docker compose --profile tools run --rm
- tools sh -c '<commands>'` (some commands combined in one invocation). Outcomes:
+Go subcommands below ran with `docker compose --profile tools run --rm tools
+sh -c '<commands>'` (some combined in one invocation). Outcomes:
 
 | Command | Result |
 |---|---|
@@ -96,7 +97,7 @@ Go subcommands below were executed in `docker compose --profile tools run --rm
 | `go build -o /tmp/flowforge-phase3-worker ./cmd/worker` | PASS; container temporary artifact |
 | `go test -race -count=1 ./internal/service/execution -run "TestPoolCancellationInFlight(Claim\|Receive)$"` | PASS |
 | `go test -count=1 ./internal/config` | PASS after environment-isolation adjustment |
-| `go run ./scripts/validate-phase-state` | PASS for claim; prospective/final publication validation below |
+| `go run ./scripts/validate-phase-state` | PASS for claim and prospective completed state with real checkpoint/tag; final state validated before metadata publication |
 | `gofmt -l` on affected Go files | PASS (empty); files formatted with gofmt |
 | `./scripts/phase3-smoke.ps1 -Concurrency 2` | PASS twice after harness corrections; final controlled-process evidence below |
 | PowerShell parser on smoke script; `git diff --check` | PASS |
@@ -189,11 +190,11 @@ if test-resource cleanup fails; final script rerun passed.
 
 - Branch: codex/phase1-api-correctness.
 - Ownership commit: 8620d1b05190a80d7b308ed2a219631a07b0d408 (pushed/verified).
-- Implementation checkpoint: pending this report's commit; to be recorded by follow-up metadata.
-- Annotated tag: phase3-multi-worker, pending creation/publication at preparation.
-- GitHub push result: implementation/tag and metadata publication pending at preparation.
+- Implementation checkpoint: cfe1988f3a6e5c3022464ee33fa18e4e1945aab3 (implementation + report).
+- Annotated tag: phase3-multi-worker; tag object 2d69d132b257a3e9c0e27bf842970d9db72e82e0; target matches checkpoint.
+- GitHub push result: implementation + tag atomic push PASS, remote refs verified at 2026-10-05T03:49:37Z. Completion metadata is committed/pushed next; its SHA is reported in the Codex completion log, not self-embedded here.
 - State commit points to the implementation/report checkpoint, not its metadata commit.
-- main must remain unchanged; no force push/history rewrite/merge/deployment.
+- Remote main verified unchanged at aa96182a037bfc502927125246e07733d0e8dbd3. No force push/history rewrite/merge/deployment.
 
 ## Documentation Updated
 
@@ -212,6 +213,6 @@ No Phase 4 prompt generated or Phase 4 execution started. Wait for external revi
 
 Correctness > Feature Count; Reliability > UI Complexity. Last_processed_phase
 stays 2 and next_prompt stays null at completion. Git metadata/state checks and
-publication timestamps are recorded in the follow-up commit below. No host
+publication timestamps are recorded here by the follow-up metadata commit. No host
 runtime installation, unrelated repository writes, global Git config changes,
 secrets or generated artifacts are part of the implementation commit.
