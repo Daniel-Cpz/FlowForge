@@ -161,13 +161,20 @@ and process proxy acceptance are the supplied evidence, not a performance benchm
 ## Git
 
 Git Branch: codex/phase1-api-correctness
-Git Commit: pending implementation checkpoint (state.commit will pin it).
-Git Tag: phase8-dashboard-websocket (annotated; pending checkpoint target).
-Git Push: pending checkpoint/tag and completed metadata publication.
+Git Commit: c349113f0f2423890fe199a81308e40cedd695d7 (implementation checkpoint).
+Git Tag: phase8-dashboard-websocket (annotated; target is that checkpoint).
+Tag object: 5bba1bae67a4b93da8b530274c017a19aeaf907c.
+Git Push: checkpoint/tag atomic push PASS; remote branch and peeled tag both
+read back as c349113f0f2423890fe199a81308e40cedd695d7. Completed state/report
+metadata is published in the subsequent ordinary branch commit; its final
+readback is required before the chat completion log.
+Remote main remains aa96182a037bfc502927125246e07733d0e8dbd3.
 
-The checkpoint includes this valid report and all implementation/docs with state
-still IN_PROGRESS. Completed metadata later records that real checkpoint SHA;
-the report cannot embed its own future commit. No force push, history rewrite,
+The checkpoint includes a valid report with pending Git fields and all
+implementation/docs with state still IN_PROGRESS. This completion metadata
+records that real checkpoint SHA; a report cannot embed its own future commit.
+Prospective completed state/checkpoint-report/tag validation passed before push.
+No force push, history rewrite,
 retagging, main merge or changes to historical migrations/reports/prompts.
 
 ## Documentation Updated
