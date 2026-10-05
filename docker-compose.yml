@@ -23,9 +23,40 @@ x-app-env: &app-env
   FLOWFORGE_RECOVERY_SECONDS: ${FLOWFORGE_RECOVERY_SECONDS:-1}
   FLOWFORGE_RETRY_BASE_SECONDS: ${FLOWFORGE_RETRY_BASE_SECONDS:-1}
   FLOWFORGE_RETRY_MAX_SECONDS: ${FLOWFORGE_RETRY_MAX_SECONDS:-30}
+  FLOWFORGE_METRICS_ENABLED: ${FLOWFORGE_METRICS_ENABLED:-true}
+  FLOWFORGE_METRICS_ADDR: :9091
+  FLOWFORGE_OTEL_ENABLED: ${FLOWFORGE_OTEL_ENABLED:-false}
+  FLOWFORGE_OTEL_EXPORTER_OTLP_ENDPOINT: ${FLOWFORGE_OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+  FLOWFORGE_OTEL_SAMPLE_RATIO: ${FLOWFORGE_OTEL_SAMPLE_RATIO:-1}
   FLOWFORGE_LOG_LEVEL: ${FLOWFORGE_LOG_LEVEL:-INFO}
 
 services:
+  prometheus:
+    profiles: ["observability"]
+    image: prom/prometheus:v3.5.0
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "127.0.0.1:${FLOWFORGE_PROMETHEUS_PUBLISHED_PORT:-9090}:9090"
+  grafana:
+    profiles: ["observability"]
+    image: grafana/grafana:12.1.1
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:${FLOWFORGE_GRAFANA_PUBLISHED_PORT:-3000}:3000"
+  otel-collector:
+    profiles: ["observability"]
+    image: otel/opentelemetry-collector:0.133.0
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./observability/otel-collector.yml:/etc/otelcol/config.yaml:ro
+
   dashboard:
     profiles: ["dashboard"]
     build: ./web

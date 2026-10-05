@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/Daniel-Cpz/FlowForge/internal/domain/job"
 	"github.com/Daniel-Cpz/FlowForge/internal/domain/schedule"
+	"github.com/Daniel-Cpz/FlowForge/internal/observability"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"time"
@@ -96,6 +97,8 @@ func (r *JobRepository) CancelSchedule(ctx context.Context, id uuid.UUID) (*sche
 // One bounded transaction commits Jobs, dispatch intents and schedule advancement.
 // Row locks serialize cancellation; SKIP LOCKED permits independent schedulers.
 func (r *JobRepository) MaterializeDue(ctx context.Context, limit int) ([]uuid.UUID, error) {
+	ctx, phase9Span := observability.Start(ctx, "schedule.materialize")
+	defer phase9Span.End()
 	if limit < 1 || limit > 100 {
 		return nil, job.ErrInvalidInput
 	}
@@ -130,8 +133,8 @@ func (r *JobRepository) MaterializeDue(ctx context.Context, limit int) ([]uuid.U
 	ids := make([]uuid.UUID, 0, len(candidates))
 	for _, v := range candidates {
 		id := uuid.New()
-		res, err := tx.Exec(ctx, `INSERT INTO jobs(id,type,status,payload,priority,max_attempts,submission_max_attempts,timeout,required_capabilities,scheduled_at,schedule_id,scheduled_for,created_at)
-  VALUES($1,$2,'QUEUED',$3,$4,$5,$5,$6,$7,$8,$9,$8,clock_timestamp()) ON CONFLICT(schedule_id,scheduled_for) DO NOTHING`, id, v.Type, v.Payload, v.Priority, v.MaxAttempts, v.Timeout, v.RequiredCapabilities, v.NextRunAt, v.ID)
+		res, err := tx.Exec(ctx, `INSERT INTO jobs(id,type,status,payload,priority,max_attempts,submission_max_attempts,timeout,required_capabilities,scheduled_at,schedule_id,scheduled_for,created_at,traceparent)
+  VALUES($1,$2,'QUEUED',$3,$4,$5,$5,$6,$7,$8,$9,$8,clock_timestamp(),$10) ON CONFLICT(schedule_id,scheduled_for) DO NOTHING`, id, v.Type, v.Payload, v.Priority, v.MaxAttempts, v.Timeout, v.RequiredCapabilities, v.NextRunAt, v.ID, observability.TraceParent(ctx))
 		if err != nil {
 			return nil, err
 		}
@@ -150,6 +153,9 @@ func (r *JobRepository) MaterializeDue(ctx context.Context, limit int) ([]uuid.U
 		return nil, err
 	}
 	for _, id := range ids {
+		if j, e := r.GetByID(ctx, id); e == nil {
+			r.observed(ctx, j, "schedule.materialized")
+		}
 		r.changed("job.changed", id, "QUEUED")
 	}
 	for _, v := range candidates {

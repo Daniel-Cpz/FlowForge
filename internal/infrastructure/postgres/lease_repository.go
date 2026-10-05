@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/Daniel-Cpz/FlowForge/internal/domain/capability"
+	"github.com/Daniel-Cpz/FlowForge/internal/observability"
 	"time"
 
 	"github.com/Daniel-Cpz/FlowForge/internal/domain/job"
@@ -149,6 +150,8 @@ func (r *JobRepository) DetectOffline(ctx context.Context, limit int) ([]uuid.UU
 // Recovery closes expired Attempts through the same budget and backoff policy.
 // No Redis access or waiting occurs while row locks are held.
 func (r *JobRepository) RecoverExpired(ctx context.Context, limit int) ([]job.RecoveredAttempt, error) {
+	ctx, phase9Span := observability.Start(ctx, "lease.recovery")
+	defer phase9Span.End()
 	if limit < 1 || limit > 100 {
 		return nil, job.ErrInvalidInput
 	}
@@ -185,10 +188,18 @@ func (r *JobRepository) RecoverExpired(ctx context.Context, limit int) ([]job.Re
 		if err != nil {
 			return nil, err
 		}
-		recovered = append(recovered, job.RecoveredAttempt{JobID: j.ID, WorkerID: *j.AssignedWorker, AttemptNumber: j.AttemptCount, Status: stored.Status, RetryAt: stored.RetryAt})
+		owner := *j.AssignedWorker
+		*j = *stored
+		recovered = append(recovered, job.RecoveredAttempt{JobID: j.ID, WorkerID: owner, AttemptNumber: j.AttemptCount, Status: stored.Status, RetryAt: stored.RetryAt})
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
+	}
+	for _, j := range candidates {
+		r.recordAttempt(ctx, j, "lease_expired")
+	}
+	if m := observability.MetricsFrom(ctx); m != nil {
+		m.Recoveries.WithLabelValues("settled").Add(float64(len(recovered)))
 	}
 	for _, v := range recovered {
 		r.changed("job.changed", v.JobID, string(v.Status))
@@ -199,6 +210,8 @@ func (r *JobRepository) RecoverExpired(ctx context.Context, limit int) ([]job.Re
 // PromoteRetries atomically makes due retries dispatchable. Every process may
 // run this bounded scan; SKIP LOCKED prevents duplicate effective transitions.
 func (r *JobRepository) PromoteRetries(ctx context.Context, limit int) ([]uuid.UUID, error) {
+	ctx, phase9Span := observability.Start(ctx, "retry.promote")
+	defer phase9Span.End()
 	if limit < 1 || limit > 100 {
 		return nil, job.ErrInvalidInput
 	}
@@ -245,6 +258,9 @@ func (r *JobRepository) PromoteRetries(ctx context.Context, limit int) ([]uuid.U
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
+	}
+	for _, j := range candidates {
+		r.observed(ctx, j, "retry.promoted")
 	}
 	for _, id := range ids {
 		r.changed("job.changed", id, "QUEUED")

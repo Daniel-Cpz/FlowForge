@@ -1,0 +1,454 @@
+{
+  "version": 1,
+  "refresh": "5s",
+  "title": "FlowForge local observability",
+  "schemaVersion": 41,
+  "timezone": "browser",
+  "uid": "flowforge-overview",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Jobs by status",
+      "datasource": {
+        "uid": "flowforge-prometheus",
+        "type": "prometheus"
+      },
+      "id": 1,
+      "gridPos": {
+        "h": 8,
+        "y": 0.0,
+        "x": 0,
+        "w": 12
+      },
+      "targets": [
+        {
+          "legendFormat": "{{status}}{{outcome}}{{reason}}{{instance}}",
+          "expr": "max without(instance,job) (flowforge_jobs_current)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Due queue depth",
+      "datasource": {
+        "uid": "flowforge-prometheus",
+        "type": "prometheus"
+      },
+      "id": 2,
+      "gridPos": {
+        "h": 8,
+        "y": 0.0,
+        "x": 12,
+        "w": 12
+      },
+      "targets": [
+        {
+          "legendFormat": "{{status}}{{outcome}}{{reason}}{{instance}}",
+          "expr": "max(flowforge_queue_depth)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Workers by status",
+      "datasource": {
+        "uid": "flowforge-prometheus",
+        "type": "prometheus"
+      },
+      "id": 3,
+      "gridPos": {
+        "h": 8,
+        "y": 8.0,
+        "x": 0,
+        "w": 12
+      },
+      "targets": [
+        {
+          "legendFormat": "{{status}}{{outcome}}{{reason}}{{instance}}",
+          "expr": "max without(instance,job) (flowforge_workers_current)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Worker active Jobs",
+      "datasource": {
+        "uid": "flowforge-prometheus",
+        "type": "prometheus"
+      },
+      "id": 4,
+      "gridPos": {
+        "h": 8,
+        "y": 8.0,
+        "x": 12,
+        "w": 12
+      },
+      "targets": [
+        {
+          "legendFormat": "{{status}}{{outcome}}{{reason}}{{instance}}",
+          "expr": "flowforge_worker_active_jobs",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Worker capacity",
+      "datasource": {
+        "uid": "flowforge-prometheus",
+        "type": "prometheus"
+      },
+      "id": 5,
+      "gridPos": {
+        "h": 8,
+        "y": 16.0,
+        "x": 0,
+        "w": 12
+      },
+      "targets": [
+        {
+          "legendFormat": "{{status}}{{outcome}}{{reason}}{{instance}}",
+          "expr": "flowforge_worker_concurrency",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Worker utilisation",
+      "datasource": {
+        "uid": "flowforge-prometheus",
+        "type": "prometheus"
+      },
+      "id": 6,
+      "gridPos": {
+        "h": 8,
+        "y": 16.0,
+        "x": 12,
+        "w": 12
+      },
+      "targets": [
+        {
+          "legendFormat": "{{status}}{{outcome}}{{reason}}{{instance}}",
+          "expr": "flowforge_worker_utilisation_ratio",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Committed Attempts by outcome",
+      "datasource": {
+        "uid": "flowforge-prometheus",
+        "type": "prometheus"
+      },
+      "id": 7,
+      "gridPos": {
+        "h": 8,
+        "y": 24.0,
+        "x": 0,
+        "w": 12
+      },
+      "targets": [
+        {
+          "legendFormat": "{{status}}{{outcome}}{{reason}}{{instance}}",
+          "expr": "sum by(outcome)(rate(flowforge_job_attempts_total[1m]))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Retry rate",
+      "datasource": {
+        "uid": "flowforge-prometheus",
+        "type": "prometheus"
+      },
+      "id": 8,
+      "gridPos": {
+        "h": 8,
+        "y": 24.0,
+        "x": 12,
+        "w": 12
+      },
+      "targets": [
+        {
+          "legendFormat": "{{status}}{{outcome}}{{reason}}{{instance}}",
+          "expr": "sum by(reason)(rate(flowforge_job_retries_total[1m]))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Recovery rate",
+      "datasource": {
+        "uid": "flowforge-prometheus",
+        "type": "prometheus"
+      },
+      "id": 9,
+      "gridPos": {
+        "h": 8,
+        "y": 32.0,
+        "x": 0,
+        "w": 12
+      },
+      "targets": [
+        {
+          "legendFormat": "{{status}}{{outcome}}{{reason}}{{instance}}",
+          "expr": "sum by(result)(rate(flowforge_job_recoveries_total[1m]))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Redrive rate",
+      "datasource": {
+        "uid": "flowforge-prometheus",
+        "type": "prometheus"
+      },
+      "id": 10,
+      "gridPos": {
+        "h": 8,
+        "y": 32.0,
+        "x": 12,
+        "w": 12
+      },
+      "targets": [
+        {
+          "legendFormat": "{{status}}{{outcome}}{{reason}}{{instance}}",
+          "expr": "sum by(result)(rate(flowforge_job_redrives_total[1m]))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "API request rate",
+      "datasource": {
+        "uid": "flowforge-prometheus",
+        "type": "prometheus"
+      },
+      "id": 11,
+      "gridPos": {
+        "h": 8,
+        "y": 40.0,
+        "x": 0,
+        "w": 12
+      },
+      "targets": [
+        {
+          "legendFormat": "{{status}}{{outcome}}{{reason}}{{instance}}",
+          "expr": "sum by(route)(rate(flowforge_http_request_duration_seconds_count{route!=\"/api/v1/ws\"}[1m]))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "API error rate",
+      "datasource": {
+        "uid": "flowforge-prometheus",
+        "type": "prometheus"
+      },
+      "id": 12,
+      "gridPos": {
+        "h": 8,
+        "y": 40.0,
+        "x": 12,
+        "w": 12
+      },
+      "targets": [
+        {
+          "legendFormat": "{{status}}{{outcome}}{{reason}}{{instance}}",
+          "expr": "sum(rate(flowforge_http_request_duration_seconds_count{status_class=\"5xx\"}[1m])) / clamp_min(sum(rate(flowforge_http_request_duration_seconds_count{route!=\"/api/v1/ws\"}[1m])),0.000001)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "API P95",
+      "datasource": {
+        "uid": "flowforge-prometheus",
+        "type": "prometheus"
+      },
+      "id": 13,
+      "gridPos": {
+        "h": 8,
+        "y": 48.0,
+        "x": 0,
+        "w": 12
+      },
+      "targets": [
+        {
+          "legendFormat": "{{status}}{{outcome}}{{reason}}{{instance}}",
+          "expr": "histogram_quantile(0.95,sum by(le)(rate(flowforge_http_request_duration_seconds_bucket{route!=\"/api/v1/ws\"}[1m])))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "WebSocket connections",
+      "datasource": {
+        "uid": "flowforge-prometheus",
+        "type": "prometheus"
+      },
+      "id": 14,
+      "gridPos": {
+        "h": 8,
+        "y": 48.0,
+        "x": 12,
+        "w": 12
+      },
+      "targets": [
+        {
+          "legendFormat": "{{status}}{{outcome}}{{reason}}{{instance}}",
+          "expr": "sum(flowforge_websocket_connections)",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Realtime drops",
+      "datasource": {
+        "uid": "flowforge-prometheus",
+        "type": "prometheus"
+      },
+      "id": 15,
+      "gridPos": {
+        "h": 8,
+        "y": 56.0,
+        "x": 0,
+        "w": 12
+      },
+      "targets": [
+        {
+          "legendFormat": "{{status}}{{outcome}}{{reason}}{{instance}}",
+          "expr": "sum by(reason)(rate(flowforge_realtime_events_dropped_total[1m]))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Slow clients",
+      "datasource": {
+        "uid": "flowforge-prometheus",
+        "type": "prometheus"
+      },
+      "id": 16,
+      "gridPos": {
+        "h": 8,
+        "y": 56.0,
+        "x": 12,
+        "w": 12
+      },
+      "targets": [
+        {
+          "legendFormat": "{{status}}{{outcome}}{{reason}}{{instance}}",
+          "expr": "sum(rate(flowforge_websocket_slow_client_disconnects_total[1m]))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Snapshot availability",
+      "datasource": {
+        "uid": "flowforge-prometheus",
+        "type": "prometheus"
+      },
+      "id": 17,
+      "gridPos": {
+        "h": 8,
+        "y": 64.0,
+        "x": 0,
+        "w": 12
+      },
+      "targets": [
+        {
+          "legendFormat": "{{status}}{{outcome}}{{reason}}{{instance}}",
+          "expr": "flowforge_snapshot_up",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Attempt duration quantile 0.5",
+      "datasource": {
+        "uid": "flowforge-prometheus",
+        "type": "prometheus"
+      },
+      "id": 18,
+      "gridPos": {
+        "h": 8,
+        "y": 64.0,
+        "x": 12,
+        "w": 12
+      },
+      "targets": [
+        {
+          "legendFormat": "{{status}}{{outcome}}{{reason}}{{instance}}",
+          "expr": "histogram_quantile(0.5,sum by(le)(rate(flowforge_job_attempt_duration_seconds_bucket[1m])))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Attempt duration quantile 0.95",
+      "datasource": {
+        "uid": "flowforge-prometheus",
+        "type": "prometheus"
+      },
+      "id": 19,
+      "gridPos": {
+        "h": 8,
+        "y": 72.0,
+        "x": 0,
+        "w": 12
+      },
+      "targets": [
+        {
+          "legendFormat": "{{status}}{{outcome}}{{reason}}{{instance}}",
+          "expr": "histogram_quantile(0.95,sum by(le)(rate(flowforge_job_attempt_duration_seconds_bucket[1m])))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Attempt duration quantile 0.99",
+      "datasource": {
+        "uid": "flowforge-prometheus",
+        "type": "prometheus"
+      },
+      "id": 20,
+      "gridPos": {
+        "h": 8,
+        "y": 72.0,
+        "x": 12,
+        "w": 12
+      },
+      "targets": [
+        {
+          "legendFormat": "{{status}}{{outcome}}{{reason}}{{instance}}",
+          "expr": "histogram_quantile(0.99,sum by(le)(rate(flowforge_job_attempt_duration_seconds_bucket[1m])))",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  }
+}

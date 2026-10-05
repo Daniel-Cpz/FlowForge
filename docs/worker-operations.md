@@ -218,3 +218,29 @@ request snapshots. Slow WS clients disconnect/retry with bounded backoff.
 resources; verifies kill/recovery, missed-event resync, DLQ history/redrive and
 scoped cleanup. Retained schema 4 is audited unchanged; do not deploy these
 new binaries against that legacy DB. See [Dashboard contract](dashboard.md).
+
+## Phase 9 observability and isolated experiments
+
+Metrics are enabled by default: API GET /metrics, Worker internal :9091/metrics.
+FLOWFORGE_METRICS_ENABLED disables endpoint serving/HTTP metric observation;
+FLOWFORGE_WORKER_METRICS_ADDR configures the internal listener. OTel defaults
+disabled; enable FLOWFORGE_OTEL_ENABLED and configure HTTP OTLP endpoint and finite
+sample ratio 0..1. Listener failure drains the Worker; serving/export resources
+join within bounded shutdown. Metrics/logs/traces are diagnostics, not authority.
+
+Prometheus DNS discovers scaled Workers. Global PG counts require max across
+replicas; process counters reset on restart. Slots utilisation is active/C,
+not CPU usage. Histogram duration includes committed Attempt time and recovery
+delay. Correlated logs carry trace/span and Job/Worker/Attempt identifiers;
+these identifiers never become metric labels. Separate telemetry PG connections
+and bounded exporter queues avoid consuming business pool slots.
+
+Use ./scripts/phase9-failure.ps1 for owned-container crash, Redis outage, network
+partition and API Pub/Sub loss, plus scrape/provision/export checks. Use
+./scripts/phase9-benchmark.ps1 for fresh-per-repeat 1/4/8/16 Worker measurements.
+Generated projects, loopback ports and isolated DB/Redis namespaces are checked
+before cleanup; finally removes only generated containers, ephemeral volumes,
+network and env file. Retained duplicate/schema audit must remain unchanged.
+Never point these scenarios at production or retained volumes. Schema 000008
+adds internal trace context and does not bypass 000005 preflight. See
+[observability](observability.md) and [baseline](benchmarks/phase-9-baseline.md).

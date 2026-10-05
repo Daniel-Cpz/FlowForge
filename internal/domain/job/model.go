@@ -9,6 +9,7 @@ import (
 
 // Timeout is expressed in seconds, including in the HTTP representation.
 type Job struct {
+	TraceParent          string          `json:"-"`
 	ScheduledAt          *time.Time      `json:"scheduled_at"`
 	RequiredCapabilities []string        `json:"required_capabilities"`
 	ScheduleID           *uuid.UUID      `json:"schedule_id"`

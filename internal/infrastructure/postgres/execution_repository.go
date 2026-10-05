@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Daniel-Cpz/FlowForge/internal/observability"
+	"go.opentelemetry.io/otel/attribute"
 	"time"
 
 	"github.com/Daniel-Cpz/FlowForge/internal/domain/job"
@@ -57,6 +59,8 @@ func (r *JobRepository) MarkPublished(ctx context.Context, id uuid.UUID) error {
 // Claim atomically wins QUEUED -> RUNNING and creates exactly one business
 // attempt in the same transaction. No SELECT followed by unconditional UPDATE.
 func (r *JobRepository) Claim(ctx context.Context, id, worker uuid.UUID) (*job.Job, error) {
+	ctx, phase9Span := observability.Start(ctx, "claim", attribute.String("job.id", id.String()), attribute.String("worker.id", worker.String()))
+	defer phase9Span.End()
 	if id == uuid.Nil || worker == uuid.Nil || !job.CanTransition(job.Queued, job.Running) {
 		return nil, job.ErrInvalidInput
 	}
@@ -132,6 +136,8 @@ func (r *JobRepository) Claim(ctx context.Context, id, worker uuid.UUID) (*job.J
 
 // Finalize commits the exact Attempt and its durable outcome before any ACK.
 func (r *JobRepository) Finalize(ctx context.Context, j *job.Job, status job.Status, result json.RawMessage, failures ...job.Failure) error {
+	ctx, phase9Span := observability.Start(ctx, "finalize")
+	defer phase9Span.End()
 	if j == nil || j.AssignedWorker == nil || j.Status != job.Running || (status != job.Succeeded && status != job.Failed && status != job.TimedOut && status != job.Cancelled) || !json.Valid(result) || len(failures) > 1 {
 		return job.ErrInvalidInput
 	}
@@ -170,6 +176,11 @@ func (r *JobRepository) Finalize(ctx context.Context, j *job.Job, status job.Sta
 		return err
 	}
 	*j = *stored
+	outcome := "permanent_failed"
+	if f.Class == job.Retryable {
+		outcome = "retryable_failed"
+	}
+	r.recordAttempt(ctx, j, outcome)
 	r.changed("job.changed", j.ID, string(j.Status))
 	return nil
 }

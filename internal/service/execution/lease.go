@@ -3,6 +3,8 @@ package execution
 import (
 	"context"
 	"errors"
+	"github.com/Daniel-Cpz/FlowForge/internal/observability"
+	"go.opentelemetry.io/otel/attribute"
 	"log/slog"
 	"time"
 
@@ -60,6 +62,9 @@ func (w *Worker) heartbeat(ctx context.Context) error {
 			if ctx.Err() != nil {
 				return nil
 			}
+			if m := observability.MetricsFrom(ctx); m != nil {
+				m.HeartbeatFailures.Inc()
+			}
 			w.logger.Error("Heartbeat failed", "event", "heartbeat_failed")
 			return errors.New("worker heartbeat failed")
 		}
@@ -82,6 +87,9 @@ func (w *Worker) recovery(ctx context.Context) error {
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
+			}
+			if m := observability.MetricsFrom(ctx); m != nil {
+				m.Recoveries.WithLabelValues("error").Inc()
 			}
 			w.logger.Warn("Recovery scan failed", "event", "recovery_failed")
 		} else {
@@ -136,6 +144,9 @@ func (w *Worker) recovery(ctx context.Context) error {
 // The deferred join also runs if an Executor panics. The claimed Job is never
 // mutated by the renew goroutine; PostgreSQL owns its current expiry.
 func (w *Worker) execute(ctx context.Context, j *job.Job, logger *slog.Logger) (out Outcome, err error) {
+	ctx, executeSpan := observability.Start(ctx, "attempt.execute", attribute.String("job.id", j.ID.String()), attribute.Int("attempt.number", j.AttemptCount))
+	defer executeSpan.End()
+	logger = observability.Correlated(ctx, logger)
 	// The deadline starts immediately before Execute, never while queued.
 	timed, endTimeout := context.WithTimeout(ctx, time.Duration(j.Timeout)*time.Second)
 	defer endTimeout()
@@ -171,6 +182,9 @@ func (w *Worker) execute(ctx context.Context, j *job.Job, logger *slog.Logger) (
 					if renewalErr != nil {
 						if executionCtx.Err() != nil {
 							return
+						}
+						if m := observability.MetricsFrom(ctx); m != nil {
+							m.RenewFailures.Inc()
 						}
 						logger.Error("Lease renewal failed", "event", "lease_renew_failed")
 						failure = errors.New("execution lease renewal failed")

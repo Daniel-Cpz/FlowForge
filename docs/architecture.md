@@ -1,6 +1,6 @@
 # Architecture
 
-Status: Phases 0–8 implemented. PostgreSQL is authoritative; Redis transports notifications.
+Status: Phases 0–9 implemented. PostgreSQL is authoritative; Redis transports notifications.
 
 ## Boundaries
 
@@ -116,7 +116,7 @@ Leases fence DB writes only; future executors need business-specific dedup/fenci
 
 Local development only: no authentication, tenant isolation, Redis TLS, admission
 control, priority aging, cron/editable schedules, persistent per-job logs,
-metrics/tracing, benchmarks or deployment automation. Stream,
+production alerting/trace storage or deployment automation. Stream,
 consumer, outbox and key retention are unbounded. SLEEP remains the only production
 executor. See ADRs 0003–0008, lifecycle, worker operations and independent reports.
 
@@ -205,3 +205,24 @@ coalescing at 250ms; stale requests are aborted/discarded. Reconnect and a 30s
 repair interval restore snapshots after lost/duplicate/out-of-order hints.
 Controls show real REST results and refetch. Escaped collapsed JSON renders at
 most 16 KiB per field. See [contract](dashboard.md) and [ADR 0009](decisions/0009-dashboard-realtime-resync.md).
+
+## Phase 9 diagnostics and measurement
+
+Composition wires process-private Prometheus registries, normalized HTTP metrics,
+Worker metrics HTTP shutdown and a separate lazy two-connection PG telemetry pool.
+Global gauges read one fresh authoritative statement; duplicate replicas aggregate
+with max. Attempt outcomes/durations are observed only after successful business
+commit. A bounded post-commit telemetry read can be lost, and never changes commit
+or ACK authority. Worker active gauges read the existing atomic slot count.
+
+Append-only 000008 adds internal traceparent. Create/materialization stores W3C
+context transactionally; replay retains the winner's context without changing
+canonical identity. Dispatcher and Worker reload it at async boundaries; retries,
+recovery and redrive preserve it. Redis still carries version and Job ID only.
+No payload, keys or raw driver errors enter telemetry. OTLP HTTP export is disabled
+by default; enabled sampling/queues/export/shutdown are bounded and lossy.
+
+Optional Prometheus/Grafana/Collector provisioning and generated-project failure
+and HTTP-load harnesses are local evidence tools. They do not participate in the
+durable state machine. See [definitions and limits](observability.md),
+[baseline](benchmarks/phase-9-baseline.md) and [ADR 0010](decisions/0010-observability-cardinality-trace-isolation.md).

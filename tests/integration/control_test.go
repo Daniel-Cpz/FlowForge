@@ -648,12 +648,7 @@ func TestPhase6MigrationUpDownConstraints(t *testing.T) {
 	if _, err := pool.Exec(ctx, `UPDATE jobs SET cancel_requested_at=clock_timestamp() WHERE id=$1`, j.ID); err == nil {
 		t.Fatal("invalid cancel metadata accepted")
 	}
-	if err := migrations.Run(ctx, pool, "down"); err != nil {
-		t.Fatal(err)
-	}
-	if err := migrations.Run(ctx, pool, "down"); err != nil {
-		t.Fatal(err)
-	}
+	downgradeTo(t, pool, 5)
 	var cols int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='jobs' AND column_name IN ('cancel_requested_at','submission_max_attempts')`).Scan(&cols); err != nil || cols != 0 {
 		t.Fatal(cols, err)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Daniel-Cpz/FlowForge/internal/observability"
+	"go.opentelemetry.io/otel/attribute"
 	"time"
 
 	"github.com/Daniel-Cpz/FlowForge/internal/domain/job"
@@ -15,11 +17,17 @@ import (
 )
 
 type JobRepository struct {
-	observe     func(string, uuid.UUID, string)
-	pool        *pgxpool.Pool
-	leasePolicy worker.LeasePolicy
-	retryPolicy retry.Policy
-	jitter      retry.Jitter
+	telemetryPool *pgxpool.Pool
+	observe       func(string, uuid.UUID, string)
+	pool          *pgxpool.Pool
+	leasePolicy   worker.LeasePolicy
+	retryPolicy   retry.Policy
+	jitter        retry.Jitter
+}
+
+func (r *JobRepository) WithTelemetryPool(pool *pgxpool.Pool) *JobRepository {
+	r.telemetryPool = pool
+	return r
 }
 
 // ObserveChanges is configured once by the composition root before concurrent use.
@@ -58,9 +66,12 @@ func NewJobRepositoryWithPolicies(pool *pgxpool.Pool, lease worker.LeasePolicy, 
 }
 
 const columns = `id, type, status, priority, payload, result, attempt_count, max_attempts,
- timeout, idempotency_key, assigned_worker, lease_expiry, created_at, started_at, finished_at, retry_at, cancel_requested_at,scheduled_at,required_capabilities,schedule_id,scheduled_for`
+ timeout, idempotency_key, assigned_worker, lease_expiry, created_at, started_at, finished_at, retry_at, cancel_requested_at,scheduled_at,required_capabilities,schedule_id,scheduled_for,traceparent`
 
 func (r *JobRepository) Create(ctx context.Context, j *job.Job) (job.CreateDisposition, error) {
+	ctx, span := observability.Start(ctx, "job.create", attribute.String("job.id", j.ID.String()))
+	defer span.End()
+	j.TraceParent = observability.TraceParent(ctx)
 	if err := j.Validate(); err != nil {
 		return "", err
 	}
@@ -75,10 +86,10 @@ func (r *JobRepository) Create(ctx context.Context, j *job.Job) (job.CreateDispo
 	}
 	defer rollback(tx)
 	stored, err := scanJob(tx.QueryRow(ctx, `INSERT INTO jobs (`+columns+`,submission_max_attempts) VALUES
-	 ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$8)
+	 ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$8)
  ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING RETURNING `+columns,
 		j.ID, j.Type, j.Status, j.Priority, j.Payload, j.Result, j.AttemptCount, j.MaxAttempts,
-		j.Timeout, j.IdempotencyKey, j.AssignedWorker, j.LeaseExpiry, j.CreatedAt, j.StartedAt, j.FinishedAt, j.RetryAt, j.CancelRequestedAt, j.ScheduledAt, j.RequiredCapabilities, j.ScheduleID, j.ScheduledFor))
+		j.Timeout, j.IdempotencyKey, j.AssignedWorker, j.LeaseExpiry, j.CreatedAt, j.StartedAt, j.FinishedAt, j.RetryAt, j.CancelRequestedAt, j.ScheduledAt, j.RequiredCapabilities, j.ScheduleID, j.ScheduledFor, j.TraceParent))
 	disposition := job.Created
 	if errors.Is(err, job.ErrNotFound) && j.IdempotencyKey != nil {
 		// A new READ COMMITTED statement sees the committed winning insert after
@@ -88,6 +99,9 @@ func (r *JobRepository) Create(ctx context.Context, j *job.Job) (job.CreateDispo
 			var same bool
 			err = tx.QueryRow(ctx, `SELECT type=$2 AND payload=$3::jsonb AND priority=$4 AND submission_max_attempts=$5 AND timeout=$6 AND scheduled_at IS NOT DISTINCT FROM $7::timestamptz AND required_capabilities=$8::text[] FROM jobs WHERE id=$1`, stored.ID, j.Type, j.Payload, j.Priority, j.MaxAttempts, j.Timeout, j.ScheduledAt, j.RequiredCapabilities).Scan(&same)
 			if err == nil && !same {
+				if m := observability.MetricsFrom(ctx); m != nil {
+					m.Submitted.WithLabelValues("conflict").Inc()
+				}
 				return "", job.ErrIdempotencyConflict
 			}
 		}
@@ -111,8 +125,12 @@ func (r *JobRepository) Create(ctx context.Context, j *job.Job) (job.CreateDispo
 		return "", fmt.Errorf("commit create: %w", err)
 	}
 	*j = *stored
+	span.SetAttributes(attribute.String("job.id", j.ID.String()), attribute.String("job.status", string(j.Status)), attribute.String("create.disposition", string(disposition)))
 	if disposition == job.Created {
 		r.changed("job.changed", j.ID, string(j.Status))
+	}
+	if m := observability.MetricsFrom(ctx); m != nil {
+		m.Submitted.WithLabelValues(string(disposition)).Inc()
 	}
 	return disposition, nil
 }
@@ -126,7 +144,7 @@ func rollback(tx pgx.Tx) {
 func scanJob(row pgx.Row) (*job.Job, error) {
 	var j job.Job
 	err := row.Scan(&j.ID, &j.Type, &j.Status, &j.Priority, &j.Payload, &j.Result, &j.AttemptCount,
-		&j.MaxAttempts, &j.Timeout, &j.IdempotencyKey, &j.AssignedWorker, &j.LeaseExpiry, &j.CreatedAt, &j.StartedAt, &j.FinishedAt, &j.RetryAt, &j.CancelRequestedAt, &j.ScheduledAt, &j.RequiredCapabilities, &j.ScheduleID, &j.ScheduledFor)
+		&j.MaxAttempts, &j.Timeout, &j.IdempotencyKey, &j.AssignedWorker, &j.LeaseExpiry, &j.CreatedAt, &j.StartedAt, &j.FinishedAt, &j.RetryAt, &j.CancelRequestedAt, &j.ScheduledAt, &j.RequiredCapabilities, &j.ScheduleID, &j.ScheduledFor, &j.TraceParent)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, job.ErrNotFound
 	}

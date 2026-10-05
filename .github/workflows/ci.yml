@@ -41,7 +41,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: sh scripts/check.sh
-      - run: go test -race -count=1 ./internal/realtime ./internal/infrastructure/... ./internal/service/... ./internal/transport/... ./tests/integration
+      - run: go test -race -count=1 ./internal/realtime ./internal/observability ./internal/infrastructure/... ./internal/service/... ./internal/transport/... ./tests/integration
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -51,3 +51,11 @@ jobs:
         working-directory: web
       - run: npm run typecheck && npm test -- --run && npm run build
         working-directory: web
+      - name: Observability configurations
+        run: |
+          docker run --rm --entrypoint /bin/promtool -v "$PWD/observability:/config:ro" prom/prometheus:v3.5.0 check config /config/prometheus.yml
+          docker run --rm -v "$PWD/observability:/config:ro" otel/opentelemetry-collector:0.133.0 validate --config=/config/otel-collector.yml
+          python -c 'import json; d=json.load(open("observability/grafana/dashboards/flowforge.json")); assert d["uid"]=="flowforge-overview" and len(d["panels"])>=15'
+      - name: Harness safety
+        shell: pwsh
+        run: ./scripts/test-phase9-harness.ps1

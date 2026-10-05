@@ -28,3 +28,4 @@ Which simpler or different approaches were considered?
 - [0007 — Priority, attempt deadlines, cancellation and DLQ](0007-priority-timeout-cancellation-dlq.md)
 - [0008 — DB-time eligibility, immutable capabilities and recurring occurrences](0008-time-capabilities-recurring-schedules.md)
 - [0009 — Dashboard transient hints and authoritative REST resync](0009-dashboard-realtime-resync.md)
+- [0010 — Bounded telemetry and durable async trace context](0010-observability-cardinality-trace-isolation.md)

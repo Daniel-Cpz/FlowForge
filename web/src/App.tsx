@@ -171,8 +171,8 @@ function Overview({ revision }: { revision: number }) {
         </>
       )}
       <p className="note">
-        Throughput, failure rate and latency metrics are planned for Phase 9.
-        Persistent application logs are not available.
+        Metrics and P50/P95/P99 are available in Grafana when the local observability profile is running. This page shows PostgreSQL snapshots.
+        Persistent application logs are not available. <a href="http://localhost:3000/d/flowforge-overview" target="_blank" rel="noreferrer">Open local Grafana</a>
       </p>
     </>
   );

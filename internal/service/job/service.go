@@ -3,7 +3,9 @@ package job
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/Daniel-Cpz/FlowForge/internal/domain/capability"
+	"github.com/Daniel-Cpz/FlowForge/internal/observability"
 	"strings"
 	"time"
 
@@ -127,7 +129,17 @@ func (s *Service) Redrive(ctx context.Context, id uuid.UUID) (*domain.Job, error
 	if !ok {
 		return nil, domain.ErrInvalidStoredData
 	}
-	return repo.RedriveDeadLetter(ctx, id)
+	j, err := repo.RedriveDeadLetter(ctx, id)
+	if err != nil {
+		if m := observability.MetricsFrom(ctx); m != nil {
+			result := "error"
+			if errors.Is(err, domain.ErrControlConflict) {
+				result = "conflict"
+			}
+			m.Redrives.WithLabelValues(result).Inc()
+		}
+	}
+	return j, err
 }
 func (s *Service) Attempts(ctx context.Context, id uuid.UUID) ([]domain.Attempt, error) {
 	if id == uuid.Nil {

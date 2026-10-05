@@ -3,6 +3,7 @@ package websocket
 
 import (
 	"encoding/json"
+	"github.com/Daniel-Cpz/FlowForge/internal/observability"
 	"github.com/Daniel-Cpz/FlowForge/internal/realtime"
 	"github.com/google/uuid"
 	ws "github.com/gorilla/websocket"
@@ -38,6 +39,7 @@ func (c *client) stop() {
 }
 
 type Hub struct {
+	metrics      *observability.Metrics
 	mu           sync.Mutex
 	clients      map[*client]struct{}
 	reserved     int
@@ -57,6 +59,7 @@ func New(limits Limits, origins []string) *Hub {
 	}
 	return h
 }
+func (h *Hub) WithMetrics(m *observability.Metrics) *Hub { h.metrics = m; return h }
 func (h *Hub) origin(r *http.Request) bool {
 	raw := r.Header.Get("Origin")
 	if raw == "" {
@@ -97,6 +100,9 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.clients[c] = struct{}{}
+	if h.metrics != nil {
+		h.metrics.Connections.Inc()
+	}
 	live := h.live
 	status := "DEGRADED"
 	if live {
@@ -112,6 +118,9 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		<-written
 		h.mu.Lock()
 		delete(h.clients, c)
+		if h.metrics != nil {
+			h.metrics.Connections.Dec()
+		}
 		h.reserved--
 		h.mu.Unlock()
 	}()
@@ -169,6 +178,9 @@ func (h *Hub) Broadcast(e realtime.Event) {
 		select {
 		case c.queue <- data:
 		default:
+			if h.metrics != nil {
+				h.metrics.SlowClients.Inc()
+			}
 			c.stop()
 		}
 	}

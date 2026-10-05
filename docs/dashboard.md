@@ -1,8 +1,14 @@
 # Dashboard contract (Phase 8)
 
 PostgreSQL is authoritative. This is a local/demo presentation and REST control
-plane. No authentication, persistent application-log store, performance metrics,
+plane. No authentication, persistent application-log store,
 UI replay/reliable delivery or exactly-once execution is provided.
+
+Phase 9 adds a link to the real provisioned Grafana overview at localhost:3000
+when the optional observability profile is running. API `/metrics`, internal
+Worker metrics and OTLP are independent diagnostics; Dashboard state remains
+REST/PG. See [metric definitions and setup](observability.md). No scaling or
+latency chart is fabricated in this React UI.
 
 ## Read API
 

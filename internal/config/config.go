@@ -6,6 +6,7 @@ import (
 	"github.com/Daniel-Cpz/FlowForge/internal/domain/worker"
 	"github.com/Daniel-Cpz/FlowForge/internal/retry"
 	"log/slog"
+	"math"
 	"net"
 	"net/url"
 	"os"
@@ -15,6 +16,11 @@ import (
 )
 
 type Config struct {
+	MetricsEnabled     bool
+	MetricsAddr        string
+	OTelEnabled        bool
+	OTelEndpoint       string
+	OTelRatio          float64
 	WSOrigins          string
 	WorkerCapabilities []string
 	Env                string
@@ -41,6 +47,30 @@ func Load() (Config, error) {
 	c := Config{Env: value("FLOWFORGE_ENV", "development"), HTTPAddr: value("FLOWFORGE_HTTP_ADDR", ":8080"),
 		RedisAddr: value("FLOWFORGE_REDIS_ADDR", "localhost:6379"), RedisPassword: os.Getenv("FLOWFORGE_REDIS_PASSWORD"),
 		RedisStream: value("FLOWFORGE_REDIS_STREAM", "flowforge:jobs:v1")}
+	var telemetryErr error
+	c.MetricsEnabled, telemetryErr = strconv.ParseBool(value("FLOWFORGE_METRICS_ENABLED", "true"))
+	if telemetryErr != nil {
+		return c, fmt.Errorf("invalid FLOWFORGE_METRICS_ENABLED")
+	}
+	c.OTelEnabled, telemetryErr = strconv.ParseBool(value("FLOWFORGE_OTEL_ENABLED", "false"))
+	if telemetryErr != nil {
+		return c, fmt.Errorf("invalid FLOWFORGE_OTEL_ENABLED")
+	}
+	c.MetricsAddr = value("FLOWFORGE_METRICS_ADDR", ":9091")
+	c.OTelEndpoint = value("FLOWFORGE_OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318")
+	endpoint, e := url.Parse(c.OTelEndpoint)
+	if e != nil || endpoint.Host == "" || (endpoint.Scheme != "http" && endpoint.Scheme != "https") || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" {
+		return c, fmt.Errorf("invalid FLOWFORGE_OTEL_EXPORTER_OTLP_ENDPOINT")
+	}
+	c.OTelRatio, telemetryErr = strconv.ParseFloat(value("FLOWFORGE_OTEL_SAMPLE_RATIO", "1"), 64)
+	if telemetryErr != nil || math.IsNaN(c.OTelRatio) || math.IsInf(c.OTelRatio, 0) || c.OTelRatio < 0 || c.OTelRatio > 1 {
+		return c, fmt.Errorf("invalid FLOWFORGE_OTEL_SAMPLE_RATIO")
+	}
+	_, metricsPort, metricsErr := net.SplitHostPort(c.MetricsAddr)
+	metricsP, metricsE := strconv.Atoi(metricsPort)
+	if metricsErr != nil || metricsE != nil || metricsP < 1 || metricsP > 65535 {
+		return c, fmt.Errorf("invalid FLOWFORGE_METRICS_ADDR")
+	}
 	concurrency := value("FLOWFORGE_WORKER_CONCURRENCY", "1")
 	var err error
 	c.WSOrigins = value("FLOWFORGE_WS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Daniel-Cpz/FlowForge/internal/domain/capability"
+	"github.com/Daniel-Cpz/FlowForge/internal/observability"
+	"go.opentelemetry.io/otel/attribute"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -97,6 +99,8 @@ func (w *Worker) handle(ctx, cleanup context.Context, msg *job.Delivery, logger 
 	if j.Status != job.Queued {
 		return false, w.queue.Ack(ctx, msg.MessageID)
 	}
+	ctx, attemptSpan := observability.Start(observability.Restore(ctx, j.TraceParent), "queue.receive", attribute.String("job.id", id.String()), attribute.String("worker.id", w.id.String()))
+	defer attemptSpan.End()
 	j, err = w.store.Claim(ctx, id, w.id)
 	// Give concurrent higher-ranked claims a short bounded opportunity to
 	// commit before deferring this delivery to normal reconciliation.
@@ -119,8 +123,10 @@ func (w *Worker) handle(ctx, cleanup context.Context, msg *job.Delivery, logger 
 		return false, err
 	}
 	active := w.active.Add(1)
-	defer w.active.Add(-1)
-	logger = logger.With("job_id", id, "attempt_number", j.AttemptCount)
+	defer func() { n := w.active.Add(-1); observability.MetricsFrom(ctx).Worker(n, int64(w.concurrency)) }()
+	observability.MetricsFrom(ctx).Worker(active, int64(w.concurrency))
+	logger = observability.Correlated(ctx, logger).With("job_id", id, "attempt_number", j.AttemptCount)
+	attemptSpan.SetAttributes(attribute.Int("attempt.number", j.AttemptCount))
 	logger.Info("Job claimed", "event", "job_claimed", "active_jobs", active)
 	if w.leases != nil {
 		logger.Info("Execution lease acquired", "event", "lease_acquired", "lease_expiry", j.LeaseExpiry)
@@ -134,7 +140,7 @@ func (w *Worker) handle(ctx, cleanup context.Context, msg *job.Delivery, logger 
 	}
 	// Every finish is bounded even if shutdown arrives during Finalize. In Run,
 	// cleanup is canceled at the single process deadline five seconds after drain.
-	finishCtx, cancel := context.WithTimeout(cleanup, 5*time.Second)
+	finishCtx, cancel := context.WithTimeout(observability.WithMetrics(observability.Restore(cleanup, j.TraceParent), observability.MetricsFrom(ctx)), 5*time.Second)
 	defer cancel()
 	var failure []job.Failure
 	if out.Status == job.Failed || out.Status == job.TimedOut {
@@ -206,6 +212,8 @@ func (w *Worker) slot(ctx, cleanup context.Context, slot int) (err error) {
 	return nil
 }
 
+func (w *Worker) ActiveJobs() int64 { return w.active.Load() }
+
 func (w *Worker) Run(ctx context.Context) error { return w.RunWithDispatcher(ctx, nil) }
 
 // RunWithDispatcher supervises exactly C slots and at most one process
@@ -239,6 +247,7 @@ func (w *Worker) RunWithDispatcher(ctx context.Context, dispatcher func(context.
 			}
 		})
 	}
+	observability.MetricsFrom(ctx).Worker(0, int64(w.concurrency))
 	w.logger.Info("Worker started", "event", "worker_started")
 	if ctx.Err() != nil {
 		drain()

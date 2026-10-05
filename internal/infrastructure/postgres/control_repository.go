@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"github.com/Daniel-Cpz/FlowForge/internal/domain/job"
+	"github.com/Daniel-Cpz/FlowForge/internal/observability"
 	"github.com/google/uuid"
 	"time"
 )
@@ -10,6 +11,8 @@ import (
 var _ job.ControlRepository = (*JobRepository)(nil)
 
 func (r *JobRepository) Cancel(ctx context.Context, id uuid.UUID) (*job.Job, error) {
+	ctx, phase9Span := observability.Start(ctx, "job.cancel")
+	defer phase9Span.End()
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	tx, err := r.pool.Begin(ctx)
@@ -44,11 +47,14 @@ func (r *JobRepository) Cancel(ctx context.Context, id uuid.UUID) (*job.Job, err
 	if err = tx.Commit(ctx); err != nil {
 		return nil, err
 	}
+	r.observed(ctx, stored, "job.control_committed")
 	r.changed("job.changed", stored.ID, string(stored.Status))
 	return stored, nil
 }
 
 func (r *JobRepository) RedriveDeadLetter(ctx context.Context, id uuid.UUID) (*job.Job, error) {
+	ctx, phase9Span := observability.Start(ctx, "job.redrive")
+	defer phase9Span.End()
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	tx, err := r.pool.Begin(ctx)
@@ -74,7 +80,11 @@ func (r *JobRepository) RedriveDeadLetter(ctx context.Context, id uuid.UUID) (*j
 	if err = tx.Commit(ctx); err != nil {
 		return nil, err
 	}
+	r.observed(ctx, stored, "job.control_committed")
 	r.changed("job.changed", stored.ID, string(stored.Status))
+	if m := observability.MetricsFrom(ctx); m != nil {
+		m.Redrives.WithLabelValues("success").Inc()
+	}
 	return stored, nil
 }
 

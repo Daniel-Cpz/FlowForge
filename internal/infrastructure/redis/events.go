@@ -3,6 +3,7 @@ package redis
 import (
 	"context"
 	"encoding/json"
+	"github.com/Daniel-Cpz/FlowForge/internal/observability"
 	"github.com/Daniel-Cpz/FlowForge/internal/realtime"
 	"github.com/google/uuid"
 	goredis "github.com/redis/go-redis/v9"
@@ -47,6 +48,9 @@ func (b *Events) Change(kind string, id uuid.UUID, status string) {
 	default:
 		// Producer must not wait even on the log sink; publisher reports drops.
 		b.dropped.Add(1)
+		if m := observability.MetricsFrom(b.ctx); m != nil {
+			m.Dropped.WithLabelValues("queue_full").Inc()
+		}
 	}
 }
 func (b *Events) publish() {
@@ -63,6 +67,14 @@ func (b *Events) publish() {
 			ctx, cancel := context.WithTimeout(b.ctx, 250*time.Millisecond)
 			err := b.client.Publish(ctx, b.channel, data).Err()
 			cancel()
+			if m := observability.MetricsFrom(b.ctx); m != nil {
+				result := "success"
+				if err != nil {
+					result = "error"
+					m.Dropped.WithLabelValues("publish_failed").Inc()
+				}
+				m.Published.WithLabelValues(result).Inc()
+			}
 			if err != nil && b.ctx.Err() == nil {
 				b.logger.Warn("UI hint publish failed", "event", "ui_hint_publish_failed")
 			}
@@ -82,6 +94,11 @@ func (b *Events) Subscribe(ctx context.Context, broadcast func(realtime.Event), 
 			msg, err := ps.Receive(ctx)
 			if err != nil {
 				state(false)
+				if ctx.Err() == nil {
+					if m := observability.MetricsFrom(b.ctx); m != nil {
+						m.Dropped.WithLabelValues("subscription_lost").Inc()
+					}
+				}
 				break
 			}
 			switch v := msg.(type) {

@@ -104,6 +104,7 @@ commitment was found. `offset` now returns 400.
 | GET | `/api/v1/workers?limit=20&cursor=...` | Bounded immutable worker UUID DESC pages |
 | GET | `/api/v1/schedules?limit=20&cursor=...` | Bounded `(created_at DESC, id DESC)` pages |
 | GET | `/api/v1/ws` | Bounded transient UI invalidation hints; reconnect requires REST snapshot |
+| GET | `/metrics` | Local/internal Prometheus diagnostics when metrics are enabled |
 
 | Create field | Missing | Explicit null | Supplied value |
 |---|---|---|---|
@@ -365,7 +366,7 @@ upgraded by schema-7 acceptance.
 
 In Docker, migrations can also run with
 `docker compose run --rm migrate /app/migrate up` (or `down`). Stop API/worker
-before rolling back schema. Seven `down` calls remove scheduling, execution control, retry schema, workers, outbox, attempts and jobs.
+before rolling back schema. Eight `down` calls remove trace context, scheduling, execution control, retry schema, workers, outbox, attempts and jobs.
 Migration 000003 backfills dispatch intent for existing QUEUED Jobs. Starting the
 Phase 2 worker therefore processes existing queued work; unsupported legacy
 types become DEAD_LETTER under Phase 5. Migration 000004 adds liveness and expiry indexes; pre-lease
@@ -446,6 +447,12 @@ outbox history have no automatic retention/cleanup yet. All ports bind to loopba
 - Bounded producer/client buffers, origin/read/idle limits and joined shutdown
 - Reconnect snapshots and 30-second reconciliation of current visible resources
 - Frontend component/reconnect tests and isolated two-API/two-worker/Vite smoke
+- Private Prometheus registries, finite labels, PG global gauges and committed Attempt histograms
+- Optional Prometheus DNS discovery, provisioned Grafana dashboard and OTLP/HTTP Collector
+- Durable internal W3C trace context across dispatch, execution, retry/recovery and control
+- Bounded telemetry queues/pools, graceful metrics shutdown and sanitized correlated logs
+- Isolated crash/Redis/partition/PubSub failure harness and bounded HTTP load generator
+- Repeated 1/4/8/16 Worker SLEEP baseline with raw results and explicit measurement limits
 
 ### Experimental
 
@@ -454,7 +461,7 @@ None. SLEEP crash recovery is tested; production hardening remains planned.
 ### Planned
 
 Cron, schedule edit/pause/resume, capability routing, priority aging, persistent per-job logs,
-metrics/tracing, systematic failure injection, benchmarking and cloud deployment.
+production alerting/trace storage, broader workload benchmarking and cloud deployment.
 
 ## Roadmap
 
@@ -462,7 +469,7 @@ Phase 1 delivers **Job Persistence + API Correctness**. Phase 2 implements
 **Redis Queue + Single Worker Execution** with a durable database outbox.
 Phase 3 implements **Multiple Workers + Bounded Concurrency**.
 Phase 4 implements **Heartbeat + Lease + Crash Recovery**.
-Phase 5 implements **Retry + Backoff + Jitter + Submission Idempotency**. Phase 6 implements **Priority + Execution Timeout + User Cancellation + Dead Letter Management**. Phase 7 implements **DB-time Delayed Jobs + Capability-aware Claim + Fixed-interval Recurring Schedules**. Phase 8 implements **React/TypeScript Dashboard + transient WebSocket hints + REST resync**. Phase 9 observability remains Planned and requires external review and a prepared prompt.
+Phase 5 implements **Retry + Backoff + Jitter + Submission Idempotency**. Phase 6 implements **Priority + Execution Timeout + User Cancellation + Dead Letter Management**. Phase 7 implements **DB-time Delayed Jobs + Capability-aware Claim + Fixed-interval Recurring Schedules**. Phase 8 implements **React/TypeScript Dashboard + transient WebSocket hints + REST resync**. Phase 9 implements **bounded metrics/tracing, isolated failure injection and repeated local benchmarks**. Phase 10 deployment remains Planned and requires external review and a prepared prompt.
 See the [Phase 0–10 roadmap](docs/development-roadmap.md) and authoritative phase state.
 The [Phase 1 report](docs/reports/phase-1-report.md) records its validation and Git checkpoint.
 The [Phase 2 report](docs/reports/phase-2-report.md) records execution/durability evidence.
@@ -472,6 +479,7 @@ The [Phase 5 report](docs/reports/phase-5-report.md) records retry/idempotency/m
 The [Phase 6 report](docs/reports/phase-6-report.md) records scheduling/control/DLQ evidence.
 The [Phase 7 report](docs/reports/phase-7-report.md) records delayed/capability/recurring evidence.
 The [Phase 8 report](docs/reports/phase-8-report.md) records Dashboard/realtime/resync evidence.
+The [Phase 9 report](docs/reports/phase-9-report.md) records observability/failure/benchmark evidence.
 This repository does not claim exactly-once execution. Delivery is at-least-once;
 business side effects need their own idempotency safeguards.
 
@@ -497,7 +505,7 @@ phase report and real Git evidence pass their gates. The separate infrastructure
 report does not complete Phase 1.
 
 FlowForge supports both manual and automation-generated phase prompts. The
-current Phase 8 prompt is `automation`, at `automation/prompts/phase-8.md`.
+current Phase 9 prompt is `automation`, at `automation/prompts/phase-9.md`.
 Phase 1 used manual input, with no prompt file required.
 Automated prompts must have an existing current-phase file.
 `prompt_path` tracks the current phase's source; `next_prompt` tracks an externally
@@ -514,7 +522,8 @@ The React/TypeScript Dashboard reads REST/PostgreSQL snapshots. WebSocket hints
 use a separate `<FLOWFORGE_REDIS_STREAM>:ui:v1` Pub/Sub channel. Reconnection and
 30-second reconciliation refresh visible resources; hints never deliver tasks
 or rebuild authoritative state. Queue depth counts due QUEUED Jobs with budget,
-including jobs without a matching capability Worker. Phase 9 metrics remain planned.
+including jobs without a matching capability Worker. Metrics use the separate
+Prometheus/Grafana stack; the Dashboard links to its provisioned overview.
 
 Use Node 24: `cd web && npm ci && npm run dev`, with a compatible API on 8080.
 Vite proxies REST and WS. On a **fresh compatible DB**,
@@ -528,6 +537,25 @@ This control plane has no authentication and is intended for loopback/local
 demonstration. Reassess auth/TLS/origins before public deployment in Phase 10.
 See [Dashboard contract](docs/dashboard.md), [frontend setup](web/README.md) and
 [ADR 0009](docs/decisions/0009-dashboard-realtime-resync.md).
+
+## Observability and measured baseline (local/demo)
+
+On a fresh compatible DB, `docker compose --profile observability up --build --scale worker=2`
+starts Prometheus at localhost:9090 and Grafana at localhost:3000/d/flowforge-overview.
+API `/metrics` and internal Worker `:9091/metrics` use finite labels. Global PG
+gauges must use max across API replicas; process counters use sum/rate. Keep these
+unauthenticated endpoints internal/loopback. OTel export defaults disabled;
+set `FLOWFORGE_OTEL_ENABLED=true` for internal OTLP/HTTP Collector debug output.
+Trace context is internal schema-8 metadata, excluded from submission identity,
+ordinary API JSON and Redis messages. Telemetry failure cannot grant execution
+authority or change a committed outcome.
+
+Use `./scripts/phase9-failure.ps1` and `./scripts/phase9-benchmark.ps1` for isolated
+resources with finally cleanup and retained-data audit. The retained schema-4 DB
+and its duplicate-key blocker are preserved. See [observability](docs/observability.md),
+[recorded baseline](docs/benchmarks/phase-9-baseline.md) and [ADR 0010](docs/decisions/0010-observability-cardinality-trace-isolation.md).
+The SLEEP baseline applies only to its recorded machine, concurrency, code and
+workload; it is not a production latency, scalability or reliability SLA.
 
 ## License
 
