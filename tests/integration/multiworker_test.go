@@ -166,13 +166,13 @@ func TestMultipleWorkerPoolsAndDispatchers(t *testing.T) {
 // Force two different Worker instances to reach Claim from the same QUEUED
 // snapshot; PostgreSQL, not a process mutex, decides the only winner.
 type claimBarrierStore struct {
-	execution.Store
+	*postgres.JobRepository
 	ready   chan struct{}
 	release chan struct{}
 }
 
 func (s *claimBarrierStore) GetByID(ctx context.Context, id uuid.UUID) (*job.Job, error) {
-	j, err := s.Store.GetByID(ctx, id)
+	j, err := s.JobRepository.GetByID(ctx, id)
 	if err == nil {
 		select {
 		case s.ready <- struct{}{}:

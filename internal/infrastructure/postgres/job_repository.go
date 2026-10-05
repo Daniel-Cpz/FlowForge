@@ -7,16 +7,29 @@ import (
 	"time"
 
 	"github.com/Daniel-Cpz/FlowForge/internal/domain/job"
+	"github.com/Daniel-Cpz/FlowForge/internal/domain/worker"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type JobRepository struct{ pool *pgxpool.Pool }
+type JobRepository struct {
+	pool        *pgxpool.Pool
+	leasePolicy worker.LeasePolicy
+}
 
 var _ job.Repository = (*JobRepository)(nil)
 
-func NewJobRepository(pool *pgxpool.Pool) *JobRepository { return &JobRepository{pool: pool} }
+func NewJobRepository(pool *pgxpool.Pool) *JobRepository {
+	return &JobRepository{pool: pool, leasePolicy: worker.DefaultLeasePolicy()}
+}
+
+func NewJobRepositoryWithPolicy(pool *pgxpool.Pool, policy worker.LeasePolicy) (*JobRepository, error) {
+	if err := policy.Validate(); err != nil {
+		return nil, err
+	}
+	return &JobRepository{pool: pool, leasePolicy: policy}, nil
+}
 
 const columns = `id, type, status, priority, payload, result, attempt_count, max_attempts,
  timeout, idempotency_key, assigned_worker, lease_expiry, created_at, started_at, finished_at`

@@ -7,6 +7,7 @@ Alternatives. Accepted decisions may be superseded by a new ADR; retain history.
 - [0002 — Phase 1 API contract and persistence boundaries](0002-phase-1-api-contract.md)
 - [0003 — Durable dispatch and single worker](0003-durable-dispatch-and-single-worker.md)
 - [0004 — Fixed worker slots and process supervision](0004-fixed-worker-pool.md)
+- [0005 — DB-time leases, fencing and atomic recovery](0005-db-time-leases-and-recovery.md)
 
 Template:
 

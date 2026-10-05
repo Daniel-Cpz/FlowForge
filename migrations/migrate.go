@@ -14,7 +14,7 @@ import (
 //go:embed *.sql
 var files embed.FS
 
-var versions = []string{"000001_create_jobs", "000002_create_job_attempts", "000003_create_job_dispatch"}
+var versions = []string{"000001_create_jobs", "000002_create_job_attempts", "000003_create_job_dispatch", "000004_worker_leases"}
 
 func Run(ctx context.Context, pool *pgxpool.Pool, direction string) error {
 	if direction != "up" && direction != "down" {

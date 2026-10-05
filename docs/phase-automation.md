@@ -59,7 +59,7 @@ implementation, testing, README, report, Git and state gates. A manual prompt
 provided directly by the user sets `prompt_source: "manual"`, `prompt_path: null`.
 There is no required archived prompt file. An automated prompt sets
 `prompt_source: "automation"` and records an existing current-phase file, such as
-`automation/prompts/phase-3.md` when `current_phase` is 3. The validator applies
+`automation/prompts/phase-4.md` when `current_phase` is 4. The validator applies
 the existing repository confinement and regular-file checks, including symlink
 escape rejection. Required source enums do not accept aliases or null; even
 `not_started` represents a phase with its source already selected in this v1.

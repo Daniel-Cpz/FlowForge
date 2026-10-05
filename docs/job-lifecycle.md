@@ -1,6 +1,6 @@
 # Job lifecycle
 
-Status: state validation and QUEUED -> RUNNING -> SUCCEEDED/FAILED execution implemented.
+Status: state validation, execution, leases and expiry recovery implemented.
 
 | From | Allowed targets |
 |---|---|
@@ -15,7 +15,9 @@ rejected. `Job.Transition` returns `ErrInvalidTransition` and leaves the job
 unchanged. Tests cover the full cross product, including unknown/empty values.
 The method validates the state graph only; execution timestamps, attempts,
 ownership and durable compare-and-set transitions are coordinated by the
-Phase 2 repository. No HTTP state-change endpoint exists.
+repository. Phase 4 adds a separate expiry-guarded RecoverExpired operation for
+RUNNING -> QUEUED; this does not expand ordinary transitions or business retry.
+No HTTP state-change endpoint exists.
 
 Creation initializes QUEUED, attempt_count 0 and UTC created_at. Payload and
 result use JSON; IDs are UUID; nullable metadata uses pointers or nil RawMessage.
@@ -29,16 +31,17 @@ worker. The attempt table reserves a unique `(job_id, attempt_number)` and
 records status, worker, start/end times, result and error. Its states are the
 execution subset RUNNING, SUCCEEDED, FAILED, TIMED_OUT and CANCELLED.
 
-Planned example: attempt 1 on A crashes, attempt 2 on B fails, attempt 3 on C
-succeeds. The attempt model/schema existed in Phase 0 without execution.
+Implemented crash example: attempt 1 on A expires, is closed FAILED/lease_expired,
+then attempt 2 on B succeeds. Business FAILED retry remains planned.
 Phase 2 inserts one RUNNING attempt during atomic claim and
 updates it with the Job's terminal status, finish time and result in one
 transaction. Duplicate rejection before claim creates no attempt. Failure codes
-are recorded in result JSON; the reserved attempt.error column remains null.
-There is no retry loop. Worker IDs have no foreign key because
-worker registration/persistence has not been designed. Phase 3 keeps one UUID
+are recorded in result JSON; expiry recovery additionally sets attempt.error
+to lease_expired. There is no business retry loop. Worker IDs have no foreign key
+so existing pre-registry Attempt history remains valid. Phase 3 keeps one UUID
 per process across all C slots; restart generates a new UUID. A slot/Redis
-consumer is not a durable worker registration.
+consumer is not the durable worker registration. Phase 4 persists process liveness
+separately in workers; stale/OFFLINE identity cannot be reused.
 
 ## Database constraints
 
@@ -46,20 +49,25 @@ Job status membership is constrained; SQL itself does not enforce transitions.
 Priority is 0–100, max_attempts 1–100, timeout 1–86400, attempt_count nonnegative.
 Attempts require positive sequence numbers and an existing job. End times cannot
 precede known start times. The list index is `(created_at DESC, id DESC)`;
-attempt uniqueness also indexes lookups by job_id. No speculative queue, lease
-or idempotency index is added before its query/semantic requirements exist.
+attempt uniqueness also indexes lookups by job_id. Phase 4 adds partial indexes
+on RUNNING lease_expiry and non-OFFLINE last_heartbeat for bounded recovery scans.
 
 Migrations 000001 and 000002 define jobs and job_attempts respectively; matching
 down files drop them in reverse order. The runner maintains schema_migrations.
 Version 000003 adds job_dispatch and backfills existing QUEUED Jobs; down drops
 only that table. Historical SQL files are unchanged.
+Version 000004 adds workers/indexes and backfills null RUNNING leases to DB now;
+down drops only its registry/indexes. Job/Attempt history is preserved, but
+downgrade binaries cannot enforce lease semantics. Stop workers before rollback.
 
 ## Executed transitions and ACK boundaries
 
 QUEUED creation commits with durable dispatch intent. Claim atomically checks
-QUEUED and attempt_count < max_attempts, assigns a per-process UUID worker,
-sets started_at and increments attempt_count, and inserts the matching attempt.
-Finalization checks RUNNING + assigned_worker + attempt number. Both repository
+QUEUED, a fresh live registry identity and integer sequence capacity, assigns the
+process UUID, sets DB-time started_at/lease_expiry, increments attempt_count and
+inserts the matching attempt. Crash recovery can exceed stored max_attempts;
+Phase 5 will define combined retry accounting, and business FAILED is not retried.
+Finalization checks RUNNING + assigned_worker + attempt number + valid DB lease. Both repository
 operations use the domain graph; no SQL trigger duplicates transition policy.
 
 SLEEP uses exactly one duration_ms integer, 0..10000 inclusive. It runs a
@@ -80,6 +88,21 @@ and Claim can race with cancellation: unclaimed deliveries remain unresolved,
 and a successful late claim attempts FAILED persistence. Executor panic leaves
 the winning Job RUNNING/pending and safely stops the process.
 
-Abrupt post-claim crash or ambiguous claim commit may leave RUNNING indefinitely.
-No heartbeat, lease renewal, stale-consumer reclaim, fencing or recovery exists.
-Queued-job notification republication never transitions RUNNING back to QUEUED.
+## Expiry recovery
+
+An abrupt post-claim crash or failed renewal leaves RUNNING until DB lease expiry.
+Reapers conditionally lock expired records; one transaction closes the exact old
+Attempt with finished_at/result/error=lease_expired, sets Job QUEUED and clears
+owner/lease/start/finish/result, then restores job_dispatch.published_at=NULL.
+Attempt count stays intact; next Claim creates a higher sequence without
+overwriting history. Any failure, missing/corrupt Attempt or intent-write failure
+rolls back the batch. No database transaction crosses SLEEP or Redis.
+
+The expired owner cannot renew even before recovery, or finalize after expiry.
+After takeover its attempt number/owner no longer match. Graceful shutdown
+before expiry records execution_cancelled; expiry races reject late Finalize
+and leave recovery evidence authoritative. Renew failure retains the delivery
+without guessing completion. Ambiguous commits require reading database truth.
+Old Redis pending messages are not reclaimed; requeue restores fresh delivery.
+Healthy reapers and reachable dependencies are required for progress. External
+side effects may overlap/repeat across leases: no exactly-once guarantee.

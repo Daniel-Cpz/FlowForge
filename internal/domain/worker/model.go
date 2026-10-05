@@ -5,7 +5,8 @@ import (
 	"time"
 )
 
-// Model only: no registration, heartbeat, or persistence use case in Phase 0.
+// Registry persists liveness, concurrency and active count in Phase 4.
+// Hostname/capabilities remain reserved; capability scheduling is not implemented.
 type Worker struct {
 	ID            uuid.UUID  `json:"worker_id"`
 	Hostname      string     `json:"hostname"`

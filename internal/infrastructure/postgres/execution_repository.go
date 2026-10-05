@@ -9,11 +9,12 @@ import (
 
 	"github.com/Daniel-Cpz/FlowForge/internal/domain/job"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 // PendingDispatch also reconciles published but still QUEUED work. A Redis
 // restart or lost pre-claim delivery therefore cannot silently strand a job.
-// This does not reclaim RUNNING work or introduce worker leases.
+// Recovery restores this intent in the same transaction as RUNNING -> QUEUED.
 func (r *JobRepository) PendingDispatch(ctx context.Context, limit int) ([]uuid.UUID, error) {
 	if limit < 1 || limit > 100 {
 		return nil, job.ErrInvalidInput
@@ -64,9 +65,25 @@ func (r *JobRepository) Claim(ctx context.Context, id, worker uuid.UUID) (*job.J
 		return nil, err
 	}
 	defer rollback(tx)
+	// Serialize registry expiry with a new claim, without holding a database
+	// transaction while executing or publishing. Worker rows precede job rows.
+	var live int
+	err = tx.QueryRow(ctx, `SELECT 1 FROM workers WHERE worker_id=$1
+	 AND status IN ('ONLINE','IDLE','BUSY') AND last_heartbeat>clock_timestamp()-make_interval(secs=>$2)
+	 FOR SHARE`, worker, r.leasePolicy.OfflineAfter.Seconds()).Scan(&live)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, job.ErrInvalidTransition
+	}
+	if err != nil {
+		return nil, err
+	}
 	j, err := scanJob(tx.QueryRow(ctx, `UPDATE jobs SET status=$2, assigned_worker=$3,
-	 attempt_count=attempt_count+1, started_at=clock_timestamp(), finished_at=NULL, result=NULL
-	 WHERE id=$1 AND status=$4 AND attempt_count < max_attempts RETURNING `+columns, id, job.Running, worker, job.Queued))
+	 attempt_count=attempt_count+1, started_at=clock_timestamp(), finished_at=NULL, result=NULL,
+	 lease_expiry=clock_timestamp()+make_interval(secs=>$5)
+	 WHERE id=$1 AND status=$4 AND attempt_count<2147483647
+	 AND EXISTS(SELECT 1 FROM workers WHERE worker_id=$3 AND status IN ('ONLINE','IDLE','BUSY')
+	 AND last_heartbeat>clock_timestamp()-make_interval(secs=>$6))
+	 RETURNING `+columns, id, job.Running, worker, job.Queued, r.leasePolicy.LeaseDuration.Seconds(), r.leasePolicy.OfflineAfter.Seconds()))
 	if errors.Is(err, job.ErrNotFound) {
 		return nil, job.ErrInvalidTransition
 	}
@@ -97,10 +114,10 @@ func (r *JobRepository) Finalize(ctx context.Context, j *job.Job, status job.Sta
 	}
 	defer rollback(tx)
 	stored, err := scanJob(tx.QueryRow(ctx, `UPDATE jobs SET status=$2, result=$3, finished_at=clock_timestamp()
-	 WHERE id=$1 AND status=$4 AND assigned_worker=$5 AND attempt_count=$6 RETURNING `+columns,
+	 WHERE id=$1 AND status=$4 AND assigned_worker=$5 AND attempt_count=$6 AND lease_expiry>clock_timestamp() RETURNING `+columns,
 		j.ID, status, result, job.Running, *j.AssignedWorker, j.AttemptCount))
 	if errors.Is(err, job.ErrNotFound) {
-		return job.ErrInvalidTransition
+		return job.ErrLeaseLost
 	}
 	if err != nil {
 		return err

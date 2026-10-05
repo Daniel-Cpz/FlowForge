@@ -276,7 +276,12 @@ func TestAtomicClaimAndOwnerFinalize(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			got, err := repo.Claim(t.Context(), j.ID, uuid.New())
+			owner := uuid.New()
+			if err := repo.RegisterWorker(t.Context(), owner, 1); err != nil {
+				errs <- err
+				return
+			}
+			got, err := repo.Claim(t.Context(), j.ID, owner)
 			if err == nil {
 				claimed <- got
 			} else if !errors.Is(err, job.ErrInvalidTransition) {
@@ -316,7 +321,11 @@ func TestRunningPoisonUnsupportedAndInvalidSleep(t *testing.T) {
 	q, client, key, group := redisQueue(t)
 	worker := execution.New(repo, q, execution.Sleep{}, testLogger())
 	j := createSleep(t, pool, `{"duration_ms":0}`)
-	if _, err := repo.Claim(t.Context(), j.ID, uuid.New()); err != nil {
+	owner := uuid.New()
+	if err := repo.RegisterWorker(t.Context(), owner, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.Claim(t.Context(), j.ID, owner); err != nil {
 		t.Fatal(err)
 	}
 	if err := q.Publish(t.Context(), j.ID); err != nil {
@@ -458,6 +467,10 @@ func TestWorkerGracefulIdleAndSleepShutdown(t *testing.T) {
 func TestOutboxMigrationBackfillAndDown(t *testing.T) {
 	pool := migratedDatabase(t)
 	ctx := t.Context()
+	// Remove the appended worker migration before testing historical outbox down.
+	if err := migrations.Run(ctx, pool, "down"); err != nil {
+		t.Fatal(err)
+	}
 	if err := migrations.Run(ctx, pool, "down"); err != nil {
 		t.Fatal(err)
 	}
@@ -476,7 +489,7 @@ func TestOutboxMigrationBackfillAndDown(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM job_dispatch WHERE job_id=$1 AND published_at IS NULL`, id).Scan(&count); err != nil || count != 1 {
 		t.Fatal("existing queued job backfill failed", err)
 	}
-	for range 3 {
+	for range 4 {
 		if err := migrations.Run(ctx, pool, "down"); err != nil {
 			t.Fatal(err)
 		}

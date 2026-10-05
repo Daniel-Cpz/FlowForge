@@ -2,12 +2,14 @@ package config
 
 import (
 	"fmt"
+	"github.com/Daniel-Cpz/FlowForge/internal/domain/worker"
 	"log/slog"
 	"net"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Config struct {
@@ -20,6 +22,7 @@ type Config struct {
 	RedisStream       string
 	LogLevel          slog.Level
 	WorkerConcurrency int
+	LeasePolicy       worker.LeasePolicy
 }
 
 func value(key, fallback string) string {
@@ -38,6 +41,27 @@ func Load() (Config, error) {
 	c.WorkerConcurrency, err = strconv.Atoi(concurrency)
 	if err != nil || c.WorkerConcurrency < 1 || c.WorkerConcurrency > 32 || strings.IndexFunc(concurrency, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
 		return c, fmt.Errorf("FLOWFORGE_WORKER_CONCURRENCY must be an integer in 1..32")
+	}
+	c.LeasePolicy = worker.DefaultLeasePolicy()
+	for _, setting := range []struct {
+		key    string
+		target *time.Duration
+	}{
+		{"FLOWFORGE_LEASE_SECONDS", &c.LeasePolicy.LeaseDuration},
+		{"FLOWFORGE_RENEW_SECONDS", &c.LeasePolicy.RenewInterval},
+		{"FLOWFORGE_HEARTBEAT_SECONDS", &c.LeasePolicy.HeartbeatInterval},
+		{"FLOWFORGE_OFFLINE_SECONDS", &c.LeasePolicy.OfflineAfter},
+		{"FLOWFORGE_RECOVERY_SECONDS", &c.LeasePolicy.RecoveryInterval},
+	} {
+		raw := value(setting.key, strconv.Itoa(int(*setting.target/time.Second)))
+		seconds, parseErr := strconv.Atoi(raw)
+		if parseErr != nil || seconds < 1 || seconds > 600 || strings.IndexFunc(raw, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
+			return c, fmt.Errorf("invalid %s", setting.key)
+		}
+		*setting.target = time.Duration(seconds) * time.Second
+	}
+	if err := c.LeasePolicy.Validate(); err != nil {
+		return c, err
 	}
 	if strings.TrimSpace(c.RedisStream) == "" || len(c.RedisStream) > 256 || strings.IndexFunc(c.RedisStream, func(r rune) bool { return r < 32 || r == 127 }) >= 0 {
 		return c, fmt.Errorf("invalid FLOWFORGE_REDIS_STREAM")

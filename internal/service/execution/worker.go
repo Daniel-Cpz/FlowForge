@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Daniel-Cpz/FlowForge/internal/domain/job"
+	domainworker "github.com/Daniel-Cpz/FlowForge/internal/domain/worker"
 	"github.com/google/uuid"
 )
 
@@ -27,13 +28,17 @@ type Queue interface {
 // Store and Queue implementations must support concurrent calls. Sleep is
 // stateless; slog is concurrency safe. Each claimed Job belongs to one slot.
 type Worker struct {
-	store       Store
-	queue       Queue
-	executor    Executor
-	logger      *slog.Logger
-	id          uuid.UUID
-	concurrency int
-	active      atomic.Int64
+	store        Store
+	queue        Queue
+	executor     Executor
+	logger       *slog.Logger
+	id           uuid.UUID
+	concurrency  int
+	active       atomic.Int64
+	leases       LeaseStore
+	policy       domainworker.LeasePolicy
+	registration sync.Mutex
+	registered   bool
 }
 
 func New(store Store, queue Queue, executor Executor, logger *slog.Logger) *Worker {
@@ -41,16 +46,28 @@ func New(store Store, queue Queue, executor Executor, logger *slog.Logger) *Work
 	return w
 }
 func NewWithConcurrency(store Store, queue Queue, executor Executor, logger *slog.Logger, concurrency int) (*Worker, error) {
+	return NewWithLeasePolicy(store, queue, executor, logger, concurrency, domainworker.DefaultLeasePolicy())
+}
+func NewWithLeasePolicy(store Store, queue Queue, executor Executor, logger *slog.Logger, concurrency int, policy domainworker.LeasePolicy) (*Worker, error) {
 	if concurrency < 1 || concurrency > 32 {
 		return nil, errors.New("worker concurrency must be in 1..32")
 	}
+	if err := policy.Validate(); err != nil {
+		return nil, err
+	}
 	id := uuid.New()
-	return &Worker{store: store, queue: queue, executor: executor, logger: logger.With("worker_id", id, "configured_concurrency", concurrency), id: id, concurrency: concurrency}, nil
+	w := &Worker{store: store, queue: queue, executor: executor, logger: logger.With("worker_id", id, "configured_concurrency", concurrency), id: id, concurrency: concurrency, policy: policy}
+	w.leases, _ = store.(LeaseStore)
+	return w, nil
 }
 
-// Handle processes one delivery, for callers that own their own serial lifecycle.
-// Run additionally limits held deliveries and supervises all concurrent slots.
+// Handle processes one delivery for serial diagnostic/test callers. It registers
+// and renews execution, but does not start process heartbeat/recovery loops.
+// Production callers use Run, which owns liveness and all concurrent slots.
 func (w *Worker) Handle(ctx context.Context, msg *job.Delivery) (bool, error) {
+	if err := w.ensureRegistered(ctx); err != nil {
+		return false, err
+	}
 	return w.handle(ctx, context.WithoutCancel(ctx), msg, w.logger)
 }
 func (w *Worker) handle(ctx, cleanup context.Context, msg *job.Delivery, logger *slog.Logger) (claimed bool, err error) {
@@ -84,15 +101,24 @@ func (w *Worker) handle(ctx, cleanup context.Context, msg *job.Delivery, logger 
 	defer w.active.Add(-1)
 	logger = logger.With("job_id", id, "attempt_number", j.AttemptCount)
 	logger.Info("Job claimed", "event", "job_claimed", "active_jobs", active)
+	if w.leases != nil {
+		logger.Info("Execution lease acquired", "event", "lease_acquired", "lease_expiry", j.LeaseExpiry)
+	}
 	// A Claim may have committed just as cancellation arrived. Execute observes
 	// cancellation and persists its outcome; an ambiguous error is never retried
 	// as business execution. A panic leaves the claimed delivery pending.
-	out := w.executor.Execute(ctx, j)
+	out, err := w.execute(ctx, j, logger)
+	if err != nil {
+		return true, err
+	}
 	// Every finish is bounded even if shutdown arrives during Finalize. In Run,
 	// cleanup is canceled at the single process deadline five seconds after drain.
 	finishCtx, cancel := context.WithTimeout(cleanup, 5*time.Second)
 	defer cancel()
 	if err := w.store.Finalize(finishCtx, j, out.Status, out.Result); err != nil {
+		if errors.Is(err, job.ErrLeaseLost) {
+			logger.Warn("Stale execution rejected", "event", "stale_finalize_rejected")
+		}
 		return true, err
 	}
 	logger.Info("Job execution persisted", "event", "job_finished", "status", out.Status, "active_jobs", w.active.Load())
@@ -162,6 +188,12 @@ func (w *Worker) Run(ctx context.Context) error { return w.RunWithDispatcher(ctx
 // Run returns only after every goroutine is joined, so the composition root can
 // close shared clients. Errors are sanitized; business FAILED outcomes continue.
 func (w *Worker) RunWithDispatcher(ctx context.Context, dispatcher func(context.Context)) error {
+	if ctx.Err() != nil {
+		return nil
+	}
+	if err := w.ensureRegistered(ctx); err != nil {
+		return errors.New("worker registration failed")
+	}
 	workCtx, stop := context.WithCancel(context.WithoutCancel(ctx))
 	defer stop()
 	cleanup, endCleanup := context.WithCancel(context.WithoutCancel(ctx))
@@ -173,6 +205,13 @@ func (w *Worker) RunWithDispatcher(ctx context.Context, dispatcher func(context.
 			w.logger.Info("Worker draining", "event", "worker_draining", "active_jobs", w.active.Load())
 			deadline = time.AfterFunc(5*time.Second, endCleanup)
 			stop()
+			// Cancel every execution before attempting a registry write, so an
+			// unavailable database cannot delay heartbeat fail-fast cancellation.
+			if w.leases != nil {
+				if err := w.leases.MarkDraining(cleanup, w.id); err != nil {
+					w.logger.Warn("Draining registration failed", "event", "worker_draining_failed")
+				}
+			}
 		})
 	}
 	w.logger.Info("Worker started", "event", "worker_started")
@@ -190,7 +229,7 @@ func (w *Worker) RunWithDispatcher(ctx context.Context, dispatcher func(context.
 		}
 	}()
 	// Buffer covers every possible producer, including a dispatcher panic.
-	results := make(chan error, w.concurrency+1)
+	results := make(chan error, w.concurrency+3)
 	var wg sync.WaitGroup
 	launch := func(run func() error) {
 		wg.Add(1)
@@ -210,6 +249,10 @@ func (w *Worker) RunWithDispatcher(ctx context.Context, dispatcher func(context.
 			}
 			results <- err
 		}()
+	}
+	if w.leases != nil {
+		launch(func() error { return w.heartbeat(workCtx) })
+		launch(func() error { return w.recovery(workCtx) })
 	}
 	if dispatcher != nil {
 		launch(func() error {
@@ -233,6 +276,22 @@ func (w *Worker) RunWithDispatcher(ctx context.Context, dispatcher func(context.
 		if err != nil && failure == nil {
 			failure = err
 		}
+	}
+	if w.leases != nil {
+		reason := "graceful_shutdown"
+		if failure != nil {
+			reason = "fatal_error"
+		}
+		stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		if err := w.leases.StopWorker(stopCtx, w.id, reason); err != nil {
+			w.logger.Warn("Worker stop registration failed", "event", "worker_stop_failed")
+			if failure == nil {
+				failure = errors.New("worker stop registration failed")
+			}
+		} else {
+			w.logger.Info("Worker offline", "event", "worker_offline", "reason", reason)
+		}
+		cancel()
 	}
 	w.logger.Info("Worker stopped", "event", "worker_stopped", "active_jobs", w.active.Load())
 	return failure
