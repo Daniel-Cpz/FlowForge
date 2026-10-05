@@ -1,6 +1,8 @@
 # v1.0.0 release readiness
 
-Current status: **v1.0.0 Release Ready; RELEASE REVIEW: PASS**. Owner Phase 10 finalization and final standard
+Current status: **v1.0.0 RELEASED; RELEASE REVIEW: PASS**.
+Main CI and the annotated tag/published GitHub Release were independently verified;
+see the [publication receipt](reports/v1.0.0-release.md). Owner Phase 10 finalization and final standard
 [regression run37310265921](https://github.com/Daniel-Cpz/FlowForge/actions/runs/37310265921)
 PASS under ADR 0012; completed state pins the real report checkpoint.
 Read [state](../automation/state.json) and the exact

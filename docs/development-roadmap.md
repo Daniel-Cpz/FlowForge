@@ -2,7 +2,7 @@
 
 Phases 0–9 are implemented: foundation, strict API/persistence, durable dispatch,
 SLEEP execution, multiple workers with bounded concurrency, DB-time lease recovery, budgeted retries/idempotency and priority/timeout/cancellation/DLQ controls.
-Phase 7 adds DB-time delayed Jobs, capability-aware Claim and fixed-interval recurring schedules. Phase 8 adds the React/TypeScript Dashboard, transient WebSocket fanout and REST resync. Phase 9 adds bounded Prometheus/OTLP diagnostics, Grafana provisioning, isolated failure injection and a repeated local benchmark. Phase 10 — Production Hardening + CI + Local Release Acceptance — is completed under explicit owner scope adjustment (ADR 0012). v1.0.0 READY; real cloud/SSH/GHCR deployment is optional. Authoritative completion status is in
+Phase 7 adds DB-time delayed Jobs, capability-aware Claim and fixed-interval recurring schedules. Phase 8 adds the React/TypeScript Dashboard, transient WebSocket fanout and REST resync. Phase 9 adds bounded Prometheus/OTLP diagnostics, Grafana provisioning, isolated failure injection and a repeated local benchmark. Phase 10 — Production Hardening + CI + Local Release Acceptance — is completed under explicit owner scope adjustment (ADR 0012). v1.0.0 Released; real cloud/SSH/GHCR deployment is optional. Authoritative completion status is in
 [`automation/state.json`](../automation/state.json). The whole-project
 [`README.md`](../README.md) and each independent report are required on completion.
 See the [protocol](phase-automation.md) and [report template](phase-report-template.md).
@@ -42,7 +42,8 @@ The separate [final completion evidence](reports/phase-10-completion.md) covers
 the new manual scope and successful final regression. Roadmap 0–10 is complete;
 no Phase 11 is generated. The owner explicitly authorized final release on
 2026-10-06; [independent review](reports/v1.0.0-release-review.md) PASS.
-Version publication remains gated by main CI and the verified tag/Release.
+Main CI, annotated tag and published GitHub Release are verified; see the
+[publication receipt](reports/v1.0.0-release.md). Lifecycle is maintenance/portfolio.
 Phase state retains last_processed_phase=9 for the separate GPT Automation;
 release review is recorded independently. After publication, lifecycle is
 maintenance/portfolio; optional work requires a later owner decision.

@@ -6,7 +6,7 @@ Lease-based execution, at-least-once delivery, Worker crash recovery, retry with
 exponential backoff/jitter, DLQ, priority/capability-aware scheduling, scheduled
 Jobs, WebSocket Dashboard, Prometheus/Grafana, Docker, CI and failure testing.
 Production-like container acceptance is validated locally and in GitHub CI;
-real cloud deployment is optional. Phase 10 is completed; **v1.0.0 Release Ready**;
+real cloud deployment is optional. Phase 10 is completed; **v1.0.0 Released**;
 see [scope decision](docs/decisions/0012-v1-local-production-acceptance.md).
 
 ## Overview
@@ -613,11 +613,14 @@ report remains BLOCKED under its original scope. Any optional future deployment
 requires an authorized target, `flowforge-cloud` Environment, SSH key and trusted
 `known_hosts`; strict host verification and all safety gates remain intact.
 
-**v1.0.0 Release Ready**. [Independent release review](docs/reports/v1.0.0-release-review.md)
-PASS; main CI, annotated tag and GitHub publication remain pending.
-[Release notes](docs/releases/v1.0.0.md) contain the complete version scope and limits.
-All release contents precede the immutable tag; actual publication status is
-recorded only after GitHub Release succeeds. No Phase 11.
+**[FlowForge v1.0.0 — Released](https://github.com/Daniel-Cpz/FlowForge/releases/tag/v1.0.0)**.
+[Independent review](docs/reports/v1.0.0-release-review.md) and main CI PASS;
+annotated tag and published GitHub Release independently verified.
+[Publication receipt](docs/reports/v1.0.0-release.md) records actual commit, tag,
+CI and Release IDs. [Release notes](docs/releases/v1.0.0.md) contain the scope and limits.
+`main` is the shared source. Lifecycle: **Maintenance / Portfolio**. No Phase 11.
+This later documentation receipt records successful publication; the immutable
+tag retains all reviewed release contents and is not moved.
 
 ## License
 

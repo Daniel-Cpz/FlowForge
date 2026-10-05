@@ -4,15 +4,15 @@ GitHub repository state is the shared automation source of truth. Consumers read
 one repository revision, starting at `automation/state.json`; they do not infer
 completion from chat history, the project README, or report ordering.
 
-The current shared entry branch is `codex/phase1-api-correctness` in
-`Daniel-Cpz/FlowForge`, through owner-authorized Phase 10 finalization. Read state,
-README, report and prompt at one revision of that actual branch; do not guess
-branch names or assume default `main` contains phase state. `main` still contains
-Phase 0 before the owner-authorized final release merge. The owner explicitly
-authorized release review, safe main merge and v1.0.0 publication on 2026-10-06;
-[review evidence](reports/v1.0.0-release-review.md) records the separate release
-gates. After verified publication, main is the shared source. Retaining this branch avoids a
-second competing state source; its historical name does not define current_phase.
+The current shared entry branch is **main** in `Daniel-Cpz/FlowForge`, after the
+owner-authorized final release on 2026-10-06. Read state, README and report at one
+revision of main. [Review evidence](reports/v1.0.0-release-review.md) and the
+[publication receipt](reports/v1.0.0-release.md) record main CI and the verified
+annotated v1.0.0/GitHub Release. The former shared branch
+`codex/phase1-api-correctness` remains the historical Phase 10 work identity in
+completed state, whose commit pins its earlier report checkpoint. The null phase
+tag differs from the version tag at the release commit. Main is the current
+shared source; do not create a competing Phase 11 or rewrite historical state.
 
 ## Independent documentation
 
