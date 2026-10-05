@@ -1,7 +1,10 @@
 # Production release bundle
 
 See [deployment runbook](../docs/deployment.md). Phase10 infrastructure is locally
-implemented; cloud acceptance awaits an authorized host/protected Environment.
+implemented and validated locally and in CI. ADR 0012 makes actual cloud/SSH/
+protected Environment deployment and GHCR publication optional, not completion
+gates. Tooling is implemented/config validated, not production-deployed or
+publication-validated; see the [completion report](../docs/reports/phase-10-completion.md).
 
 Independent compose.prod.yml has no builds/published ports, real PG TLS/Redis
 passwords, persistence/init/restart/health/log limits. Select exactly one private

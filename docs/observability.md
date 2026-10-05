@@ -144,4 +144,5 @@ only loopback9090; Grafana Viewer only loopback3000; Collector has no host port.
 Gateway blocks metrics; API/Worker metrics are internal. Use SSH tunnels for
 diagnostics. Disabled profile is not cloud dashboard evidence. Default 2 C1
 Workers reflects benchmark limits. Actual cloud UP-target/dashboard acceptance
-awaits an authorized host. See [deployment](deployment.md).
+is optional future evidence under ADR 0012, not a v1.0.0 gate or a claimed
+deployment. See [deployment](deployment.md).

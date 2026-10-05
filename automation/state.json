@@ -2,14 +2,14 @@
   "schema_version": 1,
   "project": "FlowForge",
   "current_phase": 10,
-  "status": "blocked",
+  "status": "in_progress",
   "report": null,
   "next_prompt": null,
   "last_processed_phase": 9,
   "branch": "codex/phase1-api-correctness",
   "commit": null,
   "tag": null,
-  "updated_at": "2026-10-05T11:47:07Z",
-  "prompt_source": "automation",
-  "prompt_path": "automation/prompts/phase-10.md"
+  "updated_at": "2026-10-05T12:25:10Z",
+  "prompt_source": "manual",
+  "prompt_path": null
 }

@@ -1,7 +1,13 @@
 # FlowForge
 
-Distributed Job Processing Platform for backend, distributed systems, and cloud
-engineering.
+Distributed Job Processing Platform built with Go, PostgreSQL and Redis.
+
+Lease-based execution, at-least-once delivery, Worker crash recovery, retry with
+exponential backoff/jitter, DLQ, priority/capability-aware scheduling, scheduled
+Jobs, WebSocket Dashboard, Prometheus/Grafana, Docker, CI and failure testing.
+Production-like container acceptance is validated locally and in GitHub CI;
+real cloud deployment is optional. Phase 10 owner finalization is in progress;
+see [scope decision](docs/decisions/0012-v1-local-production-acceptance.md).
 
 ## Overview
 
@@ -453,15 +459,34 @@ outbox history have no automatic retention/cleanup yet. All ports bind to loopba
 - Bounded telemetry queues/pools, graceful metrics shutdown and sanitized correlated logs
 - Isolated crash/Redis/partition/PubSub failure harness and bounded HTTP load generator
 - Repeated 1/4/8/16 Worker SLEEP baseline with raw results and explicit measurement limits
+- Independent production Compose, PostgreSQL TLS, Redis auth and static React/Caddy gateway
+- Private/public overlays, immutable-image deployment tooling, backup/restore and safety gates
+- CI validates production image/config/workflow and failure-path acceptance
+
+### Validated
+
+Real PostgreSQL/Redis integration and race checks cover lifecycle, submission
+idempotency, retry/DLQ, priority, cancellation/timeouts, scheduling, lease fencing
+and graceful shutdown. Disposable production-stack acceptance covers actual TLS,
+Redis authentication, static SPA/REST/WS, Worker hard-kill/new Attempt recovery,
+populated backup restore and named-volume restart persistence. See
+[Phase 10 completion evidence](docs/reports/phase-10-completion.md) and historical
+[progress evidence](docs/reports/phase-10-report.md); finalization verification is
+tracked independently from optional publication/deployment.
 
 ### Experimental
 
-None. SLEEP crash recovery is tested; production hardening remains planned.
+The production-like single-host Docker reference runtime is validated locally
+and in CI. It has no deployed production SLA. Public-mode tests trust a disposable
+local CA; they do not prove public ACME. SLEEP is the only executor.
 
-### Planned
+### Planned / Optional Future
 
 Cron, schedule edit/pause/resume, capability routing, priority aging, persistent per-job logs,
-production alerting/trace storage, broader workload benchmarking and cloud deployment.
+production alerting/trace storage and broader workload benchmarking. Real VPS/AWS,
+GHCR publication, protected SSH deployment, public DNS/ACME, off-host backups, HA
+and autoscaling are optional; Kubernetes/Terraform only if a future need justifies
+them. These are not a Phase 11 or v1.0.0 completion requirement.
 
 ## Roadmap
 
@@ -469,7 +494,7 @@ Phase 1 delivers **Job Persistence + API Correctness**. Phase 2 implements
 **Redis Queue + Single Worker Execution** with a durable database outbox.
 Phase 3 implements **Multiple Workers + Bounded Concurrency**.
 Phase 4 implements **Heartbeat + Lease + Crash Recovery**.
-Phase 5 implements **Retry + Backoff + Jitter + Submission Idempotency**. Phase 6 implements **Priority + Execution Timeout + User Cancellation + Dead Letter Management**. Phase 7 implements **DB-time Delayed Jobs + Capability-aware Claim + Fixed-interval Recurring Schedules**. Phase 8 implements **React/TypeScript Dashboard + transient WebSocket hints + REST resync**. Phase 9 implements **bounded metrics/tracing, isolated failure injection and repeated local benchmarks**. Phase 10 implements local production infrastructure and CI/CD workflows; actual cloud deployment acceptance is BLOCKED.
+Phase 5 implements **Retry + Backoff + Jitter + Submission Idempotency**. Phase 6 implements **Priority + Execution Timeout + User Cancellation + Dead Letter Management**. Phase 7 implements **DB-time Delayed Jobs + Capability-aware Claim + Fixed-interval Recurring Schedules**. Phase 8 implements **React/TypeScript Dashboard + transient WebSocket hints + REST resync**. Phase 9 implements **bounded metrics/tracing, isolated failure injection and repeated local benchmarks**. Phase 10 is **Production Hardening + CI + Local Release Acceptance**, finalizing under the owner's revised scope. Cloud deployment is optional.
 See the [Phase 0–10 roadmap](docs/development-roadmap.md) and authoritative phase state.
 The [Phase 1 report](docs/reports/phase-1-report.md) records its validation and Git checkpoint.
 The [Phase 2 report](docs/reports/phase-2-report.md) records execution/durability evidence.
@@ -480,13 +505,16 @@ The [Phase 6 report](docs/reports/phase-6-report.md) records scheduling/control/
 The [Phase 7 report](docs/reports/phase-7-report.md) records delayed/capability/recurring evidence.
 The [Phase 8 report](docs/reports/phase-8-report.md) records Dashboard/realtime/resync evidence.
 The [Phase 9 report](docs/reports/phase-9-report.md) records observability/failure/benchmark evidence.
+The [Phase 10 completion report](docs/reports/phase-10-completion.md) records the
+owner scope adjustment and final acceptance, preserving the original BLOCKED progress report.
 This repository does not claim exactly-once execution. Delivery is at-least-once;
 business side effects need their own idempotency safeguards.
 
 ## Development Phases / Automation
 
 This README describes the **whole project**: its purpose, architecture, setup,
-and current capabilities. Each phase has its own `docs/reports/phase-N-report.md`
+and current capabilities. Each phase has its own completion report (normally `docs/reports/phase-N-report.md`;
+Phase 10 uses `docs/reports/phase-10-completion.md` to retain its historical progress report)
 for that phase's scope, tests, failures, limitations, and Git references. Both
 documents are required at phase completion and are updated independently.
 Keep reports from earlier phases.
@@ -505,7 +533,9 @@ phase report and real Git evidence pass their gates. The separate infrastructure
 report does not complete Phase 1.
 
 FlowForge supports both manual and automation-generated phase prompts. The
-current Phase 10 prompt is `automation`, at `automation/prompts/phase-10.md`.
+current Phase 10 finalization source is `manual`, with null prompt_path. The original
+`automation/prompts/phase-10.md` remains unchanged history; explicit owner instructions
+supersede its cloud completion gates via ADR 0012.
 Phase 1 used manual input, with no prompt file required.
 Automated prompts must have an existing current-phase file.
 `prompt_path` tracks the current phase's source; `next_prompt` tracks an externally
@@ -534,7 +564,8 @@ tests and removes its own compatible DB/stream/channel and containers instead.
 It uses real WS clients; browser E2E is NOT RUN.
 
 This control plane has no authentication and is intended for loopback/local
-demonstration. Reassess auth/TLS/origins before public deployment in Phase 10.
+demonstration. Optional public deployment uses Phase 10 gateway HTTPS/Basic Auth
+and exact WS origins; application users/sessions/RBAC are still unimplemented.
 See [Dashboard contract](docs/dashboard.md), [frontend setup](web/README.md) and
 [ADR 0009](docs/decisions/0009-dashboard-realtime-resync.md).
 
@@ -557,28 +588,33 @@ and its duplicate-key blocker are preserved. See [observability](docs/observabil
 The SLEEP baseline applies only to its recorded machine, concurrency, code and
 workload; it is not a production latency, scalability or reliability SLA.
 
-## Production release infrastructure (Phase 10, cloud acceptance pending)
+## Production hardening and local release acceptance (Phase 10)
 
 Independent production Compose builds no server images. A lockfile static React
 image runs behind Caddy; private mode (selected) exposes only loopback8180 through
 SSH. Optional public mode requires HTTPS/Basic Auth. Production PG uses real TLS,
 Redis a generated strong password, internal metrics/dependencies stay private.
-Dispatch-only GHCR/digest release and protected deploy workflows implement locking,
+Optional dispatch-only GHCR/digest release and protected deploy workflows implement locking,
 backup/drain/migrate/health gates and atomic release metadata. Failure defaults
 to safe abort; no automatic schema downgrade or guessed image rollback.
 
 See [deployment/runbook](docs/deployment.md), [bundle](deploy/README.md) and
-[Phase 10 progress](docs/reports/phase-10-report.md). Local validation is separate
-from real cloud acceptance: authorized host/Environment and successful release/
-deploy/cloud smoke evidence remain required. Default2 Workers/C1 reflects Phase9
+[Phase 10 completion](docs/reports/phase-10-completion.md). CI and local image/
+config/failure validation are verified; GHCR publication, real SSH/protected
+Environment deployment and cloud acceptance are not executed and are optional.
+Default2 Workers/C1 reflects Phase9
 benchmark limits. Retained schema4 DB is untouched; main is not merged. Phase10
 is the final numbered roadmap phase; no Phase11 is generated.
 
-**BLOCKED: No authorized VPS/EC2 deployment target is currently available.**
-The user confirmed that no host, SSH user or deployment secrets are prepared or
-authorized. Actual SSH/cloud acceptance is NOT EXECUTED. Resume after an authorized
-target and the `flowforge-cloud` Environment, SSH key and trusted `known_hosts`
-are configured; preserve strict host verification.
+**Not deployed to a real VPS/EC2 by project scope decision.** ADR 0012 formally
+removes real cloud/GHCR/deployment gates from v1.0.0. The historical progress
+report remains BLOCKED under its original scope. Any optional future deployment
+requires an authorized target, `flowforge-cloud` Environment, SSH key and trusted
+`known_hosts`; strict host verification and all safety gates remain intact.
+
+Finalization is in progress; v1.0.0 readiness requires the final regression and
+completed state. Main/version tag remain subject to external review and release
+decision, not an automatic part of scope finalization.
 
 ## License
 

@@ -1,7 +1,8 @@
 # Phase reports
 
 The [project README](../../README.md) describes FlowForge as a whole. Every
-completed phase gets an independent `phase-N-report.md`. Read
+completed phase gets an independent completion report (normally `phase-N-report.md`;
+manual Phase 10 uses `phase-10-completion.md` to preserve its historical progress). Read
 [`automation/state.json`](../../automation/state.json) for the current report;
 never infer the phase from report ordering.
 
@@ -23,4 +24,5 @@ substitute for phase completion.
 - [Phase 7 — Delayed Jobs, capability-aware Claim and recurring schedules](phase-7-report.md)
 - [Phase 8 — Dashboard, WebSocket fanout and REST resync](phase-8-report.md)
 - [Phase 9 — Bounded observability, failure injection and measured local baseline](phase-9-report.md)
-- [Phase 10 — Production infrastructure progress; cloud acceptance pending](phase-10-report.md) (unfinished)
+- [Phase 10 — Historical production infrastructure progress](phase-10-report.md) (BLOCKED under original cloud-required scope; preserved unchanged)
+- [Phase 10 — Production Hardening + CI + Local Release Acceptance](phase-10-completion.md) (owner finalization in progress; ADR 0012)

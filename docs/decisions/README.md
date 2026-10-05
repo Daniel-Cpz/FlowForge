@@ -30,3 +30,4 @@ Which simpler or different approaches were considered?
 - [0009 — Dashboard transient hints and authoritative REST resync](0009-dashboard-realtime-resync.md)
 - [0010 — Bounded telemetry and durable async trace context](0010-observability-cardinality-trace-isolation.md)
 - [0011 — Single-host immutable release and maintenance gates](0011-single-host-release-boundaries.md)
+- [0012 — v1 local production acceptance and release readiness](0012-v1-local-production-acceptance.md) (supersedes 0011's cloud completion gates)

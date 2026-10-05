@@ -166,6 +166,53 @@ func TestDecodeState(t *testing.T) {
 	}
 }
 
+func TestPhase10ManualFinalizationPreservesProgress(t *testing.T) {
+	root, s := fixture(t)
+	originalCommit := s.Commit
+	writeFixture(t, root, "docs/reports/phase-10-report.md", "# FlowForge Phase 10 Progress Report\n\n## Status\nBLOCKED\n")
+	completion := strings.ReplaceAll(reportFixture(), "Phase 1", "Phase 10")
+	writeFixture(t, root, "docs/reports/phase-10-completion.md", completion)
+	writeFixture(t, root, "automation/prompts/phase-10.md", "# Historical automated prompt\n")
+	if _, err := git(root, "add", "docs/reports", "automation/prompts"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git(root, "-c", "commit.gpgsign=false", "commit", "-m", "manual finalization fixture"); err != nil {
+		t.Fatal(err)
+	}
+	sha, err := git(root, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.CurrentPhase, s.LastProcessedPhase = 10, 9
+	s.Commit, s.Report = ptr(sha), ptr("docs/reports/phase-10-completion.md")
+	for _, tc := range []struct {
+		name string
+		edit func(*State)
+		want string
+	}{
+		{"manual completion", func(s *State) {}, ""},
+		{"automated exception rejected", func(s *State) {
+			s.PromptSource, s.PromptPath = "automation", ptr("automation/prompts/phase-10.md")
+		}, "report must be"},
+		{"other phase rejected", func(s *State) { s.CurrentPhase = 9 }, "report must be"},
+		{"progress cannot certify completion", func(s *State) { s.Report = ptr("docs/reports/phase-10-report.md") }, "Completion Report"},
+		{"report absent in checkpoint", func(s *State) { s.Commit = originalCommit }, "recorded commit"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate := s
+			tc.edit(&candidate)
+			err := validate(root, candidate)
+			if tc.want == "" && err != nil || tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+				t.Fatalf("want %q, got %v", tc.want, err)
+			}
+		})
+	}
+	writeFixture(t, root, "docs/reports/phase-10-completion.md", strings.Replace(completion, "COMPLETED", "IN_PROGRESS", 1))
+	if err := validate(root, s); err == nil {
+		t.Fatal("unfinished separate report accepted")
+	}
+}
+
 func TestPromptSources(t *testing.T) {
 	root := t.TempDir()
 	writeFixture(t, root, "automation/prompts/phase-3.md", "# Phase 3 prompt fixture\n")

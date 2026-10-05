@@ -176,6 +176,11 @@ func validate(root string, s State) error {
 		return errors.New("completed requires report, commit, branch, and updated_at")
 	}
 	expected := fmt.Sprintf("docs/reports/phase-%d-report.md", s.CurrentPhase)
+	// Owner-authorized Phase 10 finalization preserves its historical BLOCKED
+	// progress report and publishes a separate completion report (ADR 0012).
+	if s.CurrentPhase == 10 && s.PromptSource == "manual" && *s.Report == "docs/reports/phase-10-completion.md" {
+		expected = *s.Report
+	}
 	if *s.Report != expected {
 		return fmt.Errorf("report must be %s for current_phase", expected)
 	}

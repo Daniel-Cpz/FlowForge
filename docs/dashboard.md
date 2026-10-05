@@ -108,8 +108,8 @@ lease_expired -> Attempt 2 success, OFFLINE hint, completion while disconnected
 
 Browser E2E NOT RUN; real WS clients plus frontend component/hook tests,
 typecheck/build and HTTP/WS process smoke are the evidence. This is not a benchmark
-or production serving design. Before Phase 10 external exposure, reassess auth,
-TLS and origin policy.
+or cloud/browser production evidence. The Phase 10 static Caddy gateway is tested
+separately; optional external exposure still requires auth/TLS/origin review.
 
 ## Phase 10 production serving
 

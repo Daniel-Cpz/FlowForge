@@ -1,6 +1,10 @@
 # Architecture
 
-Status: Phases 0–9 implemented. PostgreSQL is authoritative; Redis transports notifications.
+Status: Phases 0–9 implemented; Phase 10 owner finalization in progress.
+PostgreSQL is authoritative; Redis transports notifications. The v1 reference
+runtime is API + Worker-hosted dispatch/scheduling/maintenance, real PostgreSQL,
+Redis, multiple Workers and a static Dashboard/REST/WS gateway in single-host
+Docker Compose or an equivalent local production-like environment.
 
 ## Boundaries
 
@@ -114,9 +118,10 @@ Submission idempotency != exactly-once execution != exactly-once business side
 effect. External effects can repeat if execution happens before a failed DB commit.
 Leases fence DB writes only; future executors need business-specific dedup/fencing.
 
-Local development only: no authentication, tenant isolation, Redis TLS, admission
+No application authentication, tenant isolation, Redis TLS, admission
 control, priority aging, cron/editable schedules, persistent per-job logs,
-production alerting/trace storage or deployment automation. Stream,
+production alerting/trace storage. Optional deployment automation exists but has
+not been executed on a real host. Public gateway Basic Auth is not app RBAC. Stream,
 consumer, outbox and key retention are unbounded. SLEEP remains the only production
 executor. See ADRs 0003–0008, lifecycle, worker operations and independent reports.
 
@@ -230,10 +235,15 @@ durable state machine. See [definitions and limits](observability.md),
 ## Phase 10 release boundary
 
 Independent production Compose serves lockfile static React with Caddy and routes
-REST/WS to the same API. Private SSH-tunnel mode is selected; optional public
+REST/WS to the same API. Private loopback mode is selected (SSH tunnel for an
+optional remote host); optional public
 mode enforces HTTPS/Basic Auth. PG TLS require and password-protected Redis stay
 internal; diagnostics are private. GHCR digests/bundle revision, protected manual
 deploy, flock, backup/drain/migrate/health and atomic release record define the
 single-host maintenance boundary. Failed rollout defaults to safe abort; no
-automatic DB downgrade/guessed image rollback. Real cloud acceptance remains
-pending. See [deployment](deployment.md) and [ADR 0011](decisions/0011-single-host-release-boundaries.md).
+automatic DB downgrade/guessed image rollback. Image/config/TLS/auth/WS/recovery/
+restore/persistence are tested in isolated local Docker and GitHub CI. Publication,
+real SSH/Environment deployment and public DNS/ACME are optional and unvalidated
+on a real host; no multi-region, HA cluster, autoscaling or cloud production claim.
+See [deployment](deployment.md), [ADR 0011](decisions/0011-single-host-release-boundaries.md)
+and [owner scope decision](decisions/0012-v1-local-production-acceptance.md).

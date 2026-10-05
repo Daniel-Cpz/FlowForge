@@ -252,5 +252,6 @@ fencing and a 30 second graceful stop. Deploy backs up and drains app before
 migration, then bounds health gates. Failure retains volumes/old metadata and
 requires operator compatibility/restore decision; never automatic migrate-down.
 Retained development data is untouched. Local production crash/recovery/restore/
-restart evidence is isolated; real cloud acceptance awaits an authorized host.
+restart evidence is isolated local/GitHub CI acceptance. Actual cloud deployment
+is optional and unvalidated under ADR 0012; no host is authorized.
 See [runbook](deployment.md).

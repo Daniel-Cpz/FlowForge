@@ -5,7 +5,7 @@ one repository revision, starting at `automation/state.json`; they do not infer
 completion from chat history, the project README, or report ordering.
 
 The current shared entry branch is `codex/phase1-api-correctness` in
-`Daniel-Cpz/FlowForge`, including the Phase 2 handoff and execution. Read state,
+`Daniel-Cpz/FlowForge`, through owner-authorized Phase 10 finalization. Read state,
 README, report and prompt at one revision of that actual branch; do not guess
 branch names or assume default `main` contains phase state. `main` still contains
 Phase 0 until an explicitly authorized merge. Retaining this branch avoids a
@@ -16,7 +16,7 @@ second competing state source; its historical name does not define current_phase
 | File | Responsibility |
 |---|---|
 | `README.md` | Whole-project overview, architecture, setup, current capabilities, Implemented / Experimental / Planned, and navigation |
-| `docs/reports/phase-N-report.md` | Independent evidence for Phase N, tests, failures, limitations, and Git references |
+| Phase completion report (normally `docs/reports/phase-N-report.md`; manual Phase 10 `docs/reports/phase-10-completion.md`) | Independent evidence for Phase N, tests, failures, limitations, and Git references |
 | `docs/phase-report-template.md` | Shared report format; not a phase report |
 | `docs/reports/phase-automation-infrastructure-report.md` | This infrastructure task's results; not numbered-phase completion evidence |
 
@@ -37,7 +37,7 @@ unknown fields, duplicate keys, wrong-case keys, and trailing JSON are rejected.
 | `status` | Exactly `not_started`, `in_progress`, `completed`, or `blocked` |
 | `prompt_source` | Required string, exactly `manual` or `automation`, identifying the current phase's prompt |
 | `prompt_path` | Null for manual; for automation exactly `automation/prompts/phase-N.md` matching `current_phase`, an existing confined regular file |
-| `report` | Null until completion; then exactly `docs/reports/phase-N-report.md` for `current_phase` |
+| `report` | Null until completion; then `docs/reports/phase-N-report.md` for `current_phase`; owner-authorized manual Phase 10 finalization uses `docs/reports/phase-10-completion.md` to preserve the historical progress report (ADR 0012) |
 | `next_prompt` | Null or exactly `automation/prompts/phase-(N+1).md`, an existing file written by external Automation |
 | `last_processed_phase` | Integer from 0 through `current_phase`; external Automation advances it after reviewing the phase and creating the next prompt |
 | `branch` | Actual work branch, or null if unknown; required on completion |
@@ -156,3 +156,22 @@ Phase 1's source was manual with null prompt_path. Phases 2 and 3 use automation
 with their corresponding automation/prompts/phase-N.md. Each report and machine-readable state
 certify completion only after all gates pass.
 The infrastructure report alone does not certify a numbered phase or Phase 0.
+
+## Phase 10 owner finalization and release readiness
+
+The owner's explicit 2026-10-05 manual finalization supersedes the automated
+Phase 10 completion scope. [ADR 0012](decisions/0012-v1-local-production-acceptance.md)
+requires production-like Docker acceptance, real PostgreSQL/Redis, TLS/auth,
+failure recovery, persistence, backup/restore, CI and race/config checks.
+Real VPS/EC2, SSH/Environment deployment, GHCR publication and public DNS/ACME
+are optional, not v1.0.0 completion gates. Keep the old prompt and BLOCKED
+`docs/reports/phase-10-report.md` unchanged; publish the new manual completion
+at `docs/reports/phase-10-completion.md` with the same report-identity, confined
+file and committed Git evidence checks. No state fields or schema are added.
+
+Codex retains `last_processed_phase=9`: it represents external review, not local
+execution completion. External Automation may record review of Phase 10 by
+advancing it to 10 with `next_prompt=null`; roadmap 0–10 is exhausted, so it must
+not generate Phase 11. Finalization publishes v1.0.0 READY on the shared branch;
+main merge and the annotated v1.0.0 release tag follow external review and an
+explicit final release decision. No cloud-named Phase 10 tag is required.

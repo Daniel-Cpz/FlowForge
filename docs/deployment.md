@@ -1,10 +1,16 @@
 # Single-host release and recovery
 
-Phase 10 production infrastructure is implemented and locally tested. **Real
-cloud deployment, GHCR publication and protected Actions deployment are pending**
-an authorized host and Environment. The operator selected private mode. See the
-[Phase 10 progress report](reports/phase-10-report.md). No cloud completion claim,
-main merge, Phase 11 or v1.0.0 is made.
+Phase 10 production infrastructure is implemented and validated locally and in
+GitHub CI. Under [ADR 0012](decisions/0012-v1-local-production-acceptance.md), real
+cloud deployment, GHCR publication and protected Actions deployment are optional,
+not v1.0.0 completion gates. No real host is authorized; these paths are implemented/
+config validated, not production-deployed or publication-validated. Private mode
+is selected. See the unchanged historical [BLOCKED progress report](reports/phase-10-report.md)
+and new [completion evidence](reports/phase-10-completion.md).
+
+Not deployed to a real VPS/EC2 by project scope decision. The host/SSH commands
+below are an optional operator runbook, not actions performed during finalization.
+Never weaken host verification, TLS/auth or migration/backup/health checks.
 
 ## Target and access boundaries
 
@@ -37,7 +43,7 @@ ssh -o StrictHostKeyChecking=yes -L 8180:127.0.0.1:8180 DEPLOY_USER@AUTHORIZED_H
 ```
 
 localhost is a different origin. HTTP is inside the SSH tunnel/private network;
-this is a private cloud demo, not public HTTPS. SSH/host access is the boundary,
+this optional remote mode is a private demo, not public HTTPS. SSH/host access is the boundary,
 not application users/sessions/permissions. Public metrics are always blocked
 by the gateway, including through the private tunnel.
 
@@ -77,11 +83,14 @@ Server layout: `.env.prod`, `secrets/postgres/`, `backups/`, `releases/<full SHA
 `deploy.lock`, `current.env`, `previous.env`. Restrict parent directories. No Git clone/server
 build, private key/hash/token/archive or volume data in Git/Actions logs.
 
-## CI, GHCR and protected deployment
+## Validated CI and optional GHCR / protected deployment
 
 CI retains full Go/race/frontend/telemetry/harness checks and adds inert deploy/
 SSH failure tests, config validation and real disposable production-stack smoke.
 Release and deploy workflows are workflow_dispatch only; never push/PR deploy.
+CI is verified by actual successful run evidence. The release-images GHCR and
+protected deployment workflows are implemented/config validated, but have not
+been executed successfully as publication/deployment; no GHCR digest is claimed.
 
 release-images.yml reuses CI then builds/tests the exact image IDs before pushing
 `ghcr.io/daniel-cpz/flowforge-{backend,gateway}:<full SHA>`. Existing SHA tags are
@@ -162,9 +171,13 @@ Script refuses running writers, restores only a generated disposable DB, compare
 schema/sorted Job/Attempt/Schedule IDs, drops only that DB, and never replaces
 authoritative data. Resume using current bundle Compose/explicit worker count.
 Budget disk for archive plus restore DB. Local tests verify populated data and
-post-restart Job readability; actual cloud backup/restore is still required.
+post-restart Job readability. Actual cloud backup/restore is optional future
+operational evidence, not a v1.0.0 gate or off-host disaster-recovery proof.
 
-## Required real cloud acceptance
+## Optional future real cloud acceptance
+
+This checklist applies only after a future authorized cloud deployment decision.
+It is NOT EXECUTED and is not required for Phase 10/v1.0.0 under ADR 0012.
 
 Record provider/OS/CPU/RAM/Docker/Compose, private mode, worker count/C1, revision/
 digests and profile state; no secrets/optional private identifiers. Require fresh
