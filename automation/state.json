@@ -4,12 +4,12 @@
   "current_phase": 6,
   "status": "completed",
   "report": "docs/reports/phase-6-report.md",
-  "next_prompt": null,
-  "last_processed_phase": 5,
+  "next_prompt": "automation/prompts/phase-7.md",
+  "last_processed_phase": 6,
   "branch": "codex/phase1-api-correctness",
   "commit": "3673d56dbf466241225ebe383d47c10d8b60d246",
   "tag": "phase6-control-dlq-v2",
-  "updated_at": "2026-10-05T06:28:48Z",
+  "updated_at": "2026-10-05T06:37:26Z",
   "prompt_source": "automation",
   "prompt_path": "automation/prompts/phase-6.md"
 }
