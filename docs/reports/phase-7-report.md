@@ -100,8 +100,9 @@ Normal application data and services remain untouched.
   ./tests/integration -run TestDueHighGPUStillAllowsLowerCPU. PASS, 1.130s.
 - PowerShell ./scripts/phase7-smoke.ps1. PASS, real independent API + CPU/GPU
   Worker processes on generated schema-7 DB/stream/loopback port.
-- git diff --check and staged content/historical-source integrity inspection;
-  prospective/final completed-state validator are final publication gates.
+- git diff --check, 43-file staged content allowlist and unchanged historical
+  SQL/reports/prompts inspection: PASS. Final readonly format/state check PASS;
+  prospective completed-state validator PASS with checkpoint/tag/report identity.
 
 ### Test Results
 
@@ -176,19 +177,23 @@ codex/phase1-api-correctness
 
 ### Git Commit
 
-Pending implementation/report checkpoint commit. The completion metadata follow-up
-records its real SHA; a commit cannot contain its own hash. State remains
-in_progress until validated checkpoint/tag publication.
+54daf19da8009c2e35a6f9bff1ca5caea4be20cf — implementation/report checkpoint.
+Completion metadata is recorded in the follow-up commit; state.commit pins this
+validated checkpoint rather than attempting a self-referential metadata SHA.
 
 ### Git Tag
 
-Pending annotated phase7-scheduling-capabilities at the implementation/report checkpoint.
+Annotated phase7-scheduling-capabilities targets 54daf19da8009c2e35a6f9bff1ca5caea4be20cf, verified locally and remotely; tag object 1cf53f32e148523399e80f0cc444118f5e3073ba.
 
 ### GitHub Push Result
 
-Pending checkpoint/tag and completion metadata push/readback. No force/reset,
-automatic main merge or historical rewriting. main remains
-aa96182a037bfc502927125246e07733d0e8dbd3 pending final remote verification.
+PASS: checkpoint and annotated tag pushed atomically to origin; remote shared
+branch and peeled tag both equal 54daf19da8009c2e35a6f9bff1ca5caea4be20cf.
+Prospective completed-state validator PASS against both current and checkpoint
+report, real commit and annotated tag. Final replaced state is checked before
+this report/state metadata follow-up commit and push/readback. No force/reset,
+automatic main merge or history rewrite. main verified unchanged at
+aa96182a037bfc502927125246e07733d0e8dbd3.
 
 ## Documentation Updated
 
