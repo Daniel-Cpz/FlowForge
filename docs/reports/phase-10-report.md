@@ -95,7 +95,10 @@ host summary, then finalize report/checkpoint/annotated tag/state. No Phase11 pl
 | remote-safety.sh | PASS missing secrets before SSH; simulated pinned-host rejection before SCP |
 | config-safety.py (PyYAML6.0.2) | PASS dispatch/Environment/concurrency/private port policy |
 | actionlint1.7.7 syntax/expressions | PASS for three workflows; embedded shell syntax checked separately |
+| Release artifact validator synthetic fixtures | PASS valid immutable refs; reject mismatched/malformed SHA, duplicate/unknown/missing keys, mutable tag and component mismatch |
+| Local deployment bundle archive/checksum/content check | PASS including observability configs; no credentials/backups; no GHCR publication |
 | production-stack.py final generated run ffp10-20261005112321-10ce41b2 | PASS all checks below; scoped cleanup PASS |
+| GitHub CI on clean checkpoint37aab0c | PASS [run37304523689](https://github.com/Daniel-Cpz/FlowForge/actions/runs/37304523689); full Go/race/frontend/observability/harness/workflow/config/state-machine/production stack |
 | git diff --check / phase-state validator | PASS (pre-publication checks; final status verified separately) |
 | retained DB readonly audit | {duplicates:1,schema:4}, unchanged |
 
@@ -105,9 +108,10 @@ Production test requires Compose>=2.24.4, stdlib Python, Docker. Heavy Phase9
 
 ## Test Results
 
-Local PASS. Real cloud/release/deploy NOT RUN; Phase10 completion gate FAIL/MISSING.
-No remote CI result is inferred from local tests. Future remote run URLs must be
-recorded after an actual successful run.
+Local PASS. GitHub CI PASS at37aab0c50d4ce1cf8bf9b69c9dd7c606e72f5a86,
+job111744885819, run37304523689. Remote full integration26.724s/race25.135s;
+frontend3 test files/16 tests, all production acceptance assertions passed.
+Real cloud/release/deploy BLOCKED / NOT EXECUTED; Phase10 completion gate MISSING.
 
 ## Failure / Edge Case Validation
 
@@ -147,7 +151,8 @@ Go check, then failed the race suite in TestWorkerGracefulIdleAndSleepShutdown/i
 registration query on a loaded runner. The test now synchronizes on queue Receive,
 which starts after registration returns; it retains bounded shutdown/active retry
 assertions and also checks persisted graceful shutdown. Repeated local race
-validation (20 runs) PASS. Remote verification is recorded below when complete.
+validation (20 runs) PASS. The subsequent full GitHub CI run37304523689 PASS,
+including the unchanged production worker behavior and new shutdown assertions.
 
 ## Known Limitations
 
@@ -176,8 +181,12 @@ codex/phase1-api-correctness
 
 ## Git Commit
 
-Ownership378658ca14205234d3b7437a53cedd980619b96d. Implementation/progress checkpoint
-is recorded after normal commit/push in the following report metadata update.
+Ownership378658ca14205234d3b7437a53cedd980619b96d.
+Initial infrastructure/progress checkpoint151d1f188f4491b48074596abcb957bc9c547061.
+Release hardening and user-confirmed target block checkpoint
+37aab0c50d4ce1cf8bf9b69c9dd7c606e72f5a86. Both pushed normally to the shared branch.
+This progress evidence is recorded in a later documentation/state metadata commit;
+state.commit remains null because Phase10 is unfinished.
 
 ## Git Tag
 
@@ -200,8 +209,22 @@ NOT GHCR deployment digests. Registry image refs/digests: NOT PUBLISHED/VERIFIED
 ## Cloud / CI-CD Evidence
 
 Mode: Private, explicitly selected. Provider/OS/CPU/RAM/host/deployed revision:
-NOT PROVIDED. Release/deploy Actions runs: NOT RUN. Cloud smoke/backup/restore/
-restart/internal-only exposure: NOT RUN. No cloud checklist is marked passed.
+NOT PROVIDED/NOT AUTHORIZED. No authorized VPS/EC2 deployment target is currently available.
+Release/deploy Actions runs: NOT EXECUTED. Cloud smoke/backup/restore/
+restart/internal-only exposure: BLOCKED / NOT EXECUTED. No cloud checklist is marked passed.
+No SSH connection to any real or guessed third-party target was attempted; only
+inert host-verification fixtures ran. No placeholder private key was created or
+committed, and no SSH verification or deployment safety gate was weakened.
+
+CI [run37304523689](https://github.com/Daniel-Cpz/FlowForge/actions/runs/37304523689)
+on clean committed37aab0c finished SUCCESS (2026-10-05T11:46Z). Its generated
+production stack ffp10-20261005114344-ca874aa9 passed real local-container schema8/
+PG TLS/Redis authentication/private listeners/static SPA/internal metrics, trusted
+disposable-CA HTTPS authentication and WS forwarding/reconnect/REST repair,
+schedule/capability/DLQ redrive, owner hard-kill/lease recovery/new Attempt/success,
+custom archive restore identities, restart persistence and scoped cleanup.
+This GitHub-hosted disposable Docker evidence is not an authorized VPS/EC2
+deployment, protected Environment deployment, published GHCR image or public ACME.
 
 ## Documentation Updated
 
