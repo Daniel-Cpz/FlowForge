@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
   "project": "FlowForge",
-  "current_phase": 5,
-  "status": "completed",
-  "report": "docs/reports/phase-5-report.md",
-  "next_prompt": "automation/prompts/phase-6.md",
+  "current_phase": 6,
+  "status": "in_progress",
+  "report": null,
+  "next_prompt": null,
   "last_processed_phase": 5,
   "branch": "codex/phase1-api-correctness",
-  "commit": "984014f7980c4205f60789974b39702dfc1770e6",
-  "tag": "phase5-retry-idempotency",
-  "updated_at": "2026-10-05T05:51:30Z",
+  "commit": null,
+  "tag": null,
+  "updated_at": "2026-10-05T06:05:17Z",
   "prompt_source": "automation",
-  "prompt_path": "automation/prompts/phase-5.md"
+  "prompt_path": "automation/prompts/phase-6.md"
 }
