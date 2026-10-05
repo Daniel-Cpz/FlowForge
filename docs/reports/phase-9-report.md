@@ -218,10 +218,15 @@ contributors, requiring profiling before a causal claim.
 
 Branch: codex/phase1-api-correctness
 Benchmark source: 4ca87bc6c20e7c496080d942d9fb89150ad8bc95
-Commit: pending implementation/report checkpoint after final measurements.
-Tag: pending annotated phase9-observability-benchmarks targeting that checkpoint.
-GitHub Push Result: ownership pushed/read back; final checkpoint/tag/metadata pending.
-State retains in_progress/report=null/commit=null/tag=null/last_processed_phase=8/next_prompt=null.
+Commit: 718e9c2a874c5ad6f4ee8ac9537174065c086646 (implementation/report checkpoint).
+Tag: phase9-observability-benchmarks, annotated object
+2f4b10f2bbdafe9a2a5f11a99a04376bdca42a68, peeled target exactly the checkpoint.
+GitHub Push Result: PASS, normal atomic checkpoint/branch/tag push; remote branch
+and peeled tag target verified. Completion state/report Git references are
+published in the following validated metadata commit; no file claims its own SHA.
+State: current_phase=9, completed, last_processed_phase=8, next_prompt=null;
+report=docs/reports/phase-9-report.md, prompt_source=automation, matching Phase 9 path.
+Main remains aa96182a037bfc502927125246e07733d0e8dbd3; no automatic merge.
 
 ## Documentation Updated
 
