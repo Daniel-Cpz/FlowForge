@@ -6,7 +6,7 @@ Lease-based execution, at-least-once delivery, Worker crash recovery, retry with
 exponential backoff/jitter, DLQ, priority/capability-aware scheduling, scheduled
 Jobs, WebSocket Dashboard, Prometheus/Grafana, Docker, CI and failure testing.
 Production-like container acceptance is validated locally and in GitHub CI;
-real cloud deployment is optional. Phase 10 owner finalization is in progress;
+real cloud deployment is optional. Phase 10 is completed; **v1.0.0 READY**;
 see [scope decision](docs/decisions/0012-v1-local-production-acceptance.md).
 
 ## Overview
@@ -471,8 +471,9 @@ and graceful shutdown. Disposable production-stack acceptance covers actual TLS,
 Redis authentication, static SPA/REST/WS, Worker hard-kill/new Attempt recovery,
 populated backup restore and named-volume restart persistence. See
 [Phase 10 completion evidence](docs/reports/phase-10-completion.md) and historical
-[progress evidence](docs/reports/phase-10-report.md); finalization verification is
-tracked independently from optional publication/deployment.
+[progress evidence](docs/reports/phase-10-report.md). The final
+[CI regression](https://github.com/Daniel-Cpz/FlowForge/actions/runs/37310265921)
+passed independently of optional publication/deployment.
 
 ### Experimental
 
@@ -494,7 +495,7 @@ Phase 1 delivers **Job Persistence + API Correctness**. Phase 2 implements
 **Redis Queue + Single Worker Execution** with a durable database outbox.
 Phase 3 implements **Multiple Workers + Bounded Concurrency**.
 Phase 4 implements **Heartbeat + Lease + Crash Recovery**.
-Phase 5 implements **Retry + Backoff + Jitter + Submission Idempotency**. Phase 6 implements **Priority + Execution Timeout + User Cancellation + Dead Letter Management**. Phase 7 implements **DB-time Delayed Jobs + Capability-aware Claim + Fixed-interval Recurring Schedules**. Phase 8 implements **React/TypeScript Dashboard + transient WebSocket hints + REST resync**. Phase 9 implements **bounded metrics/tracing, isolated failure injection and repeated local benchmarks**. Phase 10 is **Production Hardening + CI + Local Release Acceptance**, finalizing under the owner's revised scope. Cloud deployment is optional.
+Phase 5 implements **Retry + Backoff + Jitter + Submission Idempotency**. Phase 6 implements **Priority + Timeout + User Cancellation + DLQ**. Phase 7 implements **Delayed Jobs + Capability-aware Claim + Recurring Schedules**. Phase 8 implements **Dashboard + WebSocket hints + REST resync**. Phase 9 implements **Observability + Failure Injection + Local Benchmarks**. Phase 10 — **Production Hardening + CI + Local Release Acceptance — Completed** under the owner's revised scope. Cloud deployment is optional; roadmap 0–10 is complete, with no Phase 11 generated.
 See the [Phase 0–10 roadmap](docs/development-roadmap.md) and authoritative phase state.
 The [Phase 1 report](docs/reports/phase-1-report.md) records its validation and Git checkpoint.
 The [Phase 2 report](docs/reports/phase-2-report.md) records execution/durability evidence.
@@ -612,9 +613,9 @@ report remains BLOCKED under its original scope. Any optional future deployment
 requires an authorized target, `flowforge-cloud` Environment, SSH key and trusted
 `known_hosts`; strict host verification and all safety gates remain intact.
 
-Finalization is in progress; v1.0.0 readiness requires the final regression and
-completed state. Main/version tag remain subject to external review and release
-decision, not an automatic part of scope finalization.
+**v1.0.0 READY**, with full final regression evidence and completed phase state.
+This is readiness, not a published version tag. Main/version tag remain subject
+to external review and release decision, not an automatic part of finalization.
 
 ## License
 

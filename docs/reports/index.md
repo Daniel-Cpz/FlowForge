@@ -25,4 +25,4 @@ substitute for phase completion.
 - [Phase 8 — Dashboard, WebSocket fanout and REST resync](phase-8-report.md)
 - [Phase 9 — Bounded observability, failure injection and measured local baseline](phase-9-report.md)
 - [Phase 10 — Historical production infrastructure progress](phase-10-report.md) (BLOCKED under original cloud-required scope; preserved unchanged)
-- [Phase 10 — Production Hardening + CI + Local Release Acceptance](phase-10-completion.md) (owner finalization in progress; ADR 0012)
+- [Phase 10 — Production Hardening + CI + Local Release Acceptance](phase-10-completion.md) (COMPLETED under owner scope decision ADR 0012; v1.0.0 READY)

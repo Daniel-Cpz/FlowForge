@@ -8,10 +8,10 @@ Production Hardening + CI + Local Release Acceptance
 
 ## Status
 
-IN_PROGRESS
+COMPLETED
 
-Manual owner finalization; final release regression and Git publication pending.
-This report is not referenced by state.report until all revised gates pass.
+Manual owner finalization; revised engineering gates passed. Published state
+pins the real implementation/report checkpoint after validation and normal push.
 
 ## Scope Adjustment
 
@@ -51,10 +51,12 @@ Core runtime, scheduling/performance paths and historical evidence are unchanged
 
 ## Validated
 
-Prior clean checkpoint37aab0c CI run37304523689 passed all Go/race/frontend/
-workflow/config and real disposable production-stack checks, recorded in the
-historical progress report. Final regression for this manual scope is pending;
-the final result will be recorded here, independently of that earlier evidence.
+Final clean scope checkpointbf630ff5e029ac1eec153c4baecf8e541bbc9c8b passed
+[CI run37310265921](https://github.com/Daniel-Cpz/FlowForge/actions/runs/37310265921),
+job111763674395, completed SUCCESS on 2026-10-05T12:38Z. Full Go/integration/race,
+frontend, observability/harness, workflow/config/deploy safety and real production
+stack acceptance PASS. This is new evidence for the manual scope, independent of
+prior run37304523689 retained in the historical BLOCKED progress report.
 
 ## Not Implemented
 
@@ -77,22 +79,41 @@ numbered phase. Final main/version release follows external review and authoriza
 
 ## Tests
 
-Final release regression: PENDING. Uses the existing `.github/workflows/ci.yml`
-without reducing checks: `sh scripts/check.sh`; the existing broad race suite;
-frontend npm ci/typecheck/tests/build; telemetry/harness validation; actionlint,
-shell/deploy fixtures, production config and `production-stack.py` acceptance.
+Final release regression uses the existing `.github/workflows/ci.yml`, unchanged:
 
-Focused validator tests, docs/claim audit, `git diff --check` and retained-data
-readonly audit are recorded as they execute. No new release pipeline invented.
+| Executed command / check | Result |
+|---|---|
+| `sh scripts/check.sh` | PASS gofmt, phase state, vet, all Go unit/integration tests/build; integration27.554s |
+| `go test -race -count=1 ./internal/realtime ./internal/observability ./internal/infrastructure/... ./internal/service/... ./internal/transport/... ./tests/integration` | PASS; integration31.732s |
+| `npm ci --no-audit --no-fund`; `npm run typecheck && npm test -- --run && npm run build` in web/ | PASS; 16 tests / 3 files, production static build |
+| Existing promtool/Collector/Grafana validation and `./scripts/test-phase9-harness.ps1` | PASS |
+| `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -shellcheck= -pyflakes= ...` | PASS three workflows |
+| `bash -n` scripts; `bash deploy/tests/state-machine.sh`; `bash deploy/tests/remote-safety.sh` | PASS syntax, eight abort paths, lock/metadata/history preservation, permissions and pinned-host fixtures |
+| `python deploy/tests/config-safety.py` with PyYAML6.0.2 | PASS workflow/Environment/concurrency/private exposure policy |
+| `python deploy/tests/production-stack.py` | PASS image build and all real Docker acceptance; generated project ffp10-20261005123531-07006d97; cleanup PASS |
+| Focused `go test -count=1 ./scripts/validate-phase-state`; `go run ./scripts/validate-phase-state` via tools | PASS including narrow manual-report boundary/recorded Git checks |
+| Changed docs relative-link/claim audit; `git diff --check` | PASS; historical reports/prompts/migrations/benchmarks unchanged |
+| Retained-data readonly audit | schema4, duplicate_groups1, duplicate_rows4, unique index absent; no data modification |
+
+Full regression ran once for final code/config via actual GitHub CI. Later changes
+record its results/completion references; final metadata/state receive focused
+validation before publication. No new release pipeline invented.
 Performance path unchanged; Phase 9 benchmark not rerun.
 
 ## Failure / Edge Case Validation
 
-Final regression must preserve Worker hard-kill/lease expiry/new Attempt/retry
-success, graceful cancellation/registry shutdown, DLQ/redrive, schedule/capability,
-Redis NOAUTH/strong-password checks, real PG TLS, trusted-CA HTTPS/WS, reconnect
-REST repair, populated archive restore and named-volume restart persistence.
-Only final executed PASS evidence will certify these gates.
+Final production regression PASS: real schema8/pg_stat_ssl TLS/key0600/Redis
+NOAUTH, private listeners/SPA/internal metrics; trusted disposable-CA HTTPS
+unauthenticated denial/authenticated REST; WebSocket handshake/hints/reconnect
+REST repair and SLEEP completion; capability schedule and DLQ redrive; hard-killed
+identified owner -> lease_expired -> new Attempt -> success; pg_dump custom archive
+restore with matching schema/Job/Attempt/Schedule IDs; named-volume restart and
+earlier Job readability. Ownership-guarded cleanup PASS. These are container
+acceptance, not a real cloud/public ACME claim.
+
+Go/race integration PASS includes graceful idle and active shutdown with persisted
+OFFLINE/graceful_shutdown, cancellation retry settlement, concurrency/idempotency,
+expired-owner fencing, retry/DLQ/schedule transaction and migration failure cases.
 
 Validator rejects automated/other-phase use of the new manual report path,
 historical progress as completion, unfinished completion identity and report
@@ -119,15 +140,18 @@ missing from its recorded commit. Existing schema/path/symlink/tag checks remain
 
 ## Release Readiness
 
-NOT READY — final regression and published completion evidence pending.
+v1.0.0 READY — revised gates PASS, accurate docs/history, safe checkpoint/normal
+push and consistent completed schema-1 state. Readiness is not version publication.
 Real cloud/publication is not a release gate. See [release policy](../release-readiness.md).
 
 ## Git
 
 Branch: codex/phase1-api-correctness.
 Previous progress metadata checkpoint: b9aced4865cc4d6e005602001de8ca42982f82fb.
-Final implementation/report checkpoint: pending after tests.
-Push: pending final checkpoint. Tag: none; no cloud-named tag.
+Tested scope/validator checkpoint: bf630ff5e029ac1eec153c4baecf8e541bbc9c8b.
+Final implementation/report checkpoint: recorded by follow-up Git metadata after
+this completed report exists in a real commit. Push: normal shared-branch publication.
+Tag: none; no cloud-named tag.
 Main remains aa96182a037bfc502927125246e07733d0e8dbd3; review required before
 main/version release. Later metadata records the real checkpoint SHA; no self-reference.
 
@@ -146,6 +170,7 @@ version release decision. Codex does not manufacture review or advance its count
 ## Notes
 
 2026-10-05 owner scope decision is the source of the new completion criteria.
+Finalization execution ID: phase-10-finalization-20261005T122510Z.
 Cloud removal never weakens TLS/auth/SSH verification or correctness gates.
 The schema remains version1 and no new state fields are added. Completion and
 v1.0.0 READY are published only after final tests and a real report checkpoint.

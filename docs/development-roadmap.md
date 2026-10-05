@@ -2,7 +2,7 @@
 
 Phases 0–9 are implemented: foundation, strict API/persistence, durable dispatch,
 SLEEP execution, multiple workers with bounded concurrency, DB-time lease recovery, budgeted retries/idempotency and priority/timeout/cancellation/DLQ controls.
-Phase 7 adds DB-time delayed Jobs, capability-aware Claim and fixed-interval recurring schedules. Phase 8 adds the React/TypeScript Dashboard, transient WebSocket fanout and REST resync. Phase 9 adds bounded Prometheus/OTLP diagnostics, Grafana provisioning, isolated failure injection and a repeated local benchmark. Phase 10 is Production Hardening + CI + Local Release Acceptance, finalizing under explicit owner scope adjustment (ADR 0012). Real cloud/SSH/GHCR deployment is optional. Authoritative completion status is in
+Phase 7 adds DB-time delayed Jobs, capability-aware Claim and fixed-interval recurring schedules. Phase 8 adds the React/TypeScript Dashboard, transient WebSocket fanout and REST resync. Phase 9 adds bounded Prometheus/OTLP diagnostics, Grafana provisioning, isolated failure injection and a repeated local benchmark. Phase 10 — Production Hardening + CI + Local Release Acceptance — is completed under explicit owner scope adjustment (ADR 0012). v1.0.0 READY; real cloud/SSH/GHCR deployment is optional. Authoritative completion status is in
 [`automation/state.json`](../automation/state.json). The whole-project
 [`README.md`](../README.md) and each independent report are required on completion.
 See the [protocol](phase-automation.md) and [report template](phase-report-template.md).
@@ -39,7 +39,8 @@ Phase 10. Its unchanged progress report records the accurate historical BLOCKED
 state. The owner subsequently removed cloud/SSH/GHCR/publication/deployment gates
 from v1.0.0 via [ADR 0012](decisions/0012-v1-local-production-acceptance.md).
 The separate [final completion evidence](reports/phase-10-completion.md) covers
-the new manual scope and final regression. Finalization is currently in progress.
+the new manual scope and successful final regression. Roadmap 0–10 is complete;
+no Phase 11 is generated. The version is ready, not yet published as a tag.
 Codex preserves last_processed_phase=9 and does not generate Phase11. After this
 final numbered phase, external review and an explicit operator decision are
 required for main merge/versioned release or further work.

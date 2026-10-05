@@ -1,6 +1,6 @@
 # Architecture
 
-Status: Phases 0–9 implemented; Phase 10 owner finalization in progress.
+Status: Phases 0–10 completed under the owner-authorized v1 scope (ADR 0012).
 PostgreSQL is authoritative; Redis transports notifications. The v1 reference
 runtime is API + Worker-hosted dispatch/scheduling/maintenance, real PostgreSQL,
 Redis, multiple Workers and a static Dashboard/REST/WS gateway in single-host

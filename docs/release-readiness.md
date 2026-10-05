@@ -1,6 +1,8 @@
 # v1.0.0 release readiness
 
-Current status: NOT READY while owner Phase 10 finalization/regression is in progress.
+Current status: **v1.0.0 READY**. Owner Phase 10 finalization and final standard
+[regression run37310265921](https://github.com/Daniel-Cpz/FlowForge/actions/runs/37310265921)
+PASS under ADR 0012; completed state pins the real report checkpoint.
 Read [state](../automation/state.json) and the exact
 [completion report](reports/phase-10-completion.md) for published evidence.
 
