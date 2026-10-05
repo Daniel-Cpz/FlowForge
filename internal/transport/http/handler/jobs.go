@@ -42,6 +42,8 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 
 func (h *Jobs) fail(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
+	case errors.Is(err, domain.ErrControlConflict):
+		writeError(w, 409, "JOB_CONTROL_CONFLICT", "job cannot accept this command")
 	case errors.Is(err, domain.ErrIdempotencyConflict):
 		writeError(w, 409, "IDEMPOTENCY_CONFLICT", "idempotency key belongs to a different request")
 	case errors.Is(err, domain.ErrInvalidInput):
@@ -106,6 +108,10 @@ func (h *Jobs) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Jobs) List(w http.ResponseWriter, r *http.Request) {
+	h.list(w, r, false)
+}
+func (h *Jobs) DeadLetter(w http.ResponseWriter, r *http.Request) { h.list(w, r, true) }
+func (h *Jobs) list(w http.ResponseWriter, r *http.Request, dead bool) {
 	limit := 20
 	query, err := url.ParseQuery(r.URL.RawQuery)
 	if err != nil {
@@ -137,7 +143,12 @@ func (h *Jobs) List(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	page, err := h.service.List(r.Context(), limit, after)
+	var page *domain.Page
+	if dead {
+		page, err = h.service.ListDeadLetter(r.Context(), limit, after)
+	} else {
+		page, err = h.service.List(r.Context(), limit, after)
+	}
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -155,6 +166,62 @@ func (h *Jobs) List(w http.ResponseWriter, r *http.Request) {
 		Jobs       []domain.Job `json:"jobs"`
 		NextCursor *string      `json:"next_cursor"`
 	}{Jobs: page.Jobs, NextCursor: next})
+}
+
+func controlID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil || len(r.PathValue("id")) != 36 || id == uuid.Nil {
+		writeError(w, 400, "INVALID_ID", "invalid job UUID")
+		return uuid.Nil, false
+	}
+	return id, true
+}
+func (h *Jobs) Cancel(w http.ResponseWriter, r *http.Request)  { h.command(w, r, false) }
+func (h *Jobs) Redrive(w http.ResponseWriter, r *http.Request) { h.command(w, r, true) }
+func (h *Jobs) command(w http.ResponseWriter, r *http.Request, redrive bool) {
+	id, ok := controlID(w, r)
+	if !ok {
+		return
+	}
+	defer r.Body.Close()
+	r.Body = http.MaxBytesReader(w, r.Body, 1)
+	body, err := io.ReadAll(r.Body)
+	if err != nil || len(body) != 0 || r.URL.RawQuery != "" {
+		writeError(w, 400, "INVALID_INPUT", "command requires no body or query")
+		return
+	}
+	var j *domain.Job
+	event := "job_cancel_requested"
+	if redrive {
+		j, err = h.service.Redrive(r.Context(), id)
+		event = "job_redriven"
+	} else {
+		j, err = h.service.Cancel(r.Context(), id)
+	}
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	h.logger.InfoContext(r.Context(), "Job control persisted", "event", event, "job_id", id, "status", j.Status, "attempt_count", j.AttemptCount, "max_attempts", j.MaxAttempts)
+	writeJSON(w, 200, j)
+}
+func (h *Jobs) Attempts(w http.ResponseWriter, r *http.Request) {
+	id, ok := controlID(w, r)
+	if !ok {
+		return
+	}
+	if r.URL.RawQuery != "" {
+		writeError(w, 400, "INVALID_INPUT", "attempts does not accept query parameters")
+		return
+	}
+	attempts, err := h.service.Attempts(r.Context(), id)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	writeJSON(w, 200, struct {
+		Attempts []domain.Attempt `json:"attempts"`
+	}{Attempts: attempts})
 }
 
 // RoutingError keeps unknown routes and unsupported methods in the same envelope.

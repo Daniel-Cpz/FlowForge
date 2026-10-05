@@ -200,6 +200,9 @@ func TestPhase5MigrationDuplicatePreflightAndNormalization(t *testing.T) {
 	if e := migrations.Run(ctx, pool, "down"); e != nil {
 		t.Fatal(e)
 	}
+	if e := migrations.Run(ctx, pool, "down"); e != nil {
+		t.Fatal(e)
+	}
 	id1, id2 := uuid.New(), uuid.New()
 	if _, e := pool.Exec(ctx, `INSERT INTO jobs(id,type,payload,idempotency_key) VALUES($1,'SLEEP','{}','legacy-duplicate'),($2,'SLEEP','{}','legacy-duplicate')`, id1, id2); e != nil {
 		t.Fatal(e)
@@ -225,6 +228,9 @@ func TestPhase5MigrationDuplicatePreflightAndNormalization(t *testing.T) {
 	got, e := repo.GetByID(ctx, id1)
 	if e != nil || got.AttemptCount != 2 || got.MaxAttempts != 2 || got.Status != job.DeadLetter {
 		t.Fatal("legacy budget not preserved/frozen", got, e)
+	}
+	if e := migrations.Run(ctx, pool, "down"); e != nil {
+		t.Fatal(e)
 	}
 	if e := migrations.Run(ctx, pool, "down"); e != nil {
 		t.Fatal(e)

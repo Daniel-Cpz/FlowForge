@@ -28,7 +28,10 @@ func (j *Job) Validate() error {
 	if (j.Status == Retrying) != (j.RetryAt != nil) || (j.Status == Retrying && (j.AssignedWorker != nil || j.LeaseExpiry != nil || j.AttemptCount >= j.MaxAttempts)) {
 		return ErrInvalidInput
 	}
-	for _, timestamp := range []*time.Time{j.LeaseExpiry, j.RetryAt, j.StartedAt, j.FinishedAt} {
+	if j.CancelRequestedAt != nil && j.Status != Running && j.Status != Cancelled {
+		return ErrInvalidInput
+	}
+	for _, timestamp := range []*time.Time{j.LeaseExpiry, j.RetryAt, j.StartedAt, j.FinishedAt, j.CancelRequestedAt} {
 		if timestamp != nil && !validTime(*timestamp) {
 			return ErrInvalidInput
 		}

@@ -116,47 +116,63 @@ func (w *Worker) recovery(ctx context.Context) error {
 // The deferred join also runs if an Executor panics. The claimed Job is never
 // mutated by the renew goroutine; PostgreSQL owns its current expiry.
 func (w *Worker) execute(ctx context.Context, j *job.Job, logger *slog.Logger) (out Outcome, err error) {
-	if w.leases == nil {
-		return w.executor.Execute(ctx, j), nil
-	}
-	executionCtx, cancel := context.WithCancel(ctx)
+	// The deadline starts immediately before Execute, never while queued.
+	timed, endTimeout := context.WithTimeout(ctx, time.Duration(j.Timeout)*time.Second)
+	defer endTimeout()
+	executionCtx, cancel := context.WithCancelCause(timed)
 	done := make(chan error, 1)
-	go func() {
-		var failure error
-		defer func() {
-			if recover() != nil {
-				failure = errors.New("lease renewal panicked")
-			}
-			if failure != nil {
-				cancel()
-			}
-			done <- failure
-		}()
-		ticker := time.NewTicker(w.policy.RenewInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-executionCtx.Done():
-				return
-			case <-ticker.C:
-				expiry, err := w.leases.Renew(executionCtx, j)
-				if err != nil {
-					if executionCtx.Err() != nil {
+	if w.leases == nil {
+		done <- nil
+	} else {
+		go func() {
+			var failure error
+			defer func() {
+				if recover() != nil {
+					failure = errors.New("lease renewal panicked")
+				}
+				if failure != nil {
+					cancel(failure)
+				}
+				done <- failure
+			}()
+			ticker := time.NewTicker(w.policy.RenewInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-executionCtx.Done():
+					return
+				case <-ticker.C:
+					expiry, renewalErr := w.leases.Renew(executionCtx, j)
+					if errors.Is(renewalErr, job.ErrCancellationRequested) {
+						cancel(job.ErrCancellationRequested)
+						logger.Info("User cancellation observed", "event", "cancellation_observed")
 						return
 					}
-					logger.Error("Lease renewal failed", "event", "lease_renew_failed")
-					failure = errors.New("execution lease renewal failed")
-					return
+					if renewalErr != nil {
+						if executionCtx.Err() != nil {
+							return
+						}
+						logger.Error("Lease renewal failed", "event", "lease_renew_failed")
+						failure = errors.New("execution lease renewal failed")
+						return
+					}
+					logger.Info("Execution lease renewed", "event", "lease_renewed", "lease_expiry", expiry)
 				}
-				logger.Info("Execution lease renewed", "event", "lease_renewed", "lease_expiry", expiry)
 			}
-		}
-	}()
+		}()
+	}
 	defer func() {
-		cancel()
+		cancel(context.Canceled)
 		if renewalErr := <-done; renewalErr != nil {
 			err = renewalErr
 		}
 	}()
-	return w.executor.Execute(executionCtx, j), nil
+	out = w.executor.Execute(executionCtx, j)
+	switch cause := context.Cause(executionCtx); {
+	case errors.Is(cause, job.ErrCancellationRequested):
+		out = Outcome{Status: job.Cancelled, Result: []byte(`{"error":"user_cancelled"}`)}
+	case errors.Is(cause, context.DeadlineExceeded) && ctx.Err() == nil:
+		out = Outcome{Status: job.TimedOut, Result: []byte(`{"error":"execution_timeout"}`), Failure: job.Failure{Class: job.Retryable, Code: "execution_timeout"}}
+	}
+	return out, nil
 }

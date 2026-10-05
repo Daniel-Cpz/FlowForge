@@ -1,19 +1,19 @@
 # Job lifecycle
 
-Status: execution, leases, budgeted retries and submission idempotency implemented.
+Status: Phase 6 priority, attempt timeout, user cancellation and DLQ controls implemented.
 
 | From | Allowed targets |
 |---|---|
 | QUEUED | RUNNING, CANCELLED |
 | RUNNING | SUCCEEDED, FAILED, TIMED_OUT, CANCELLED |
 | FAILED | RETRYING, DEAD_LETTER |
-| RETRYING | QUEUED |
-| SUCCEEDED, DEAD_LETTER, CANCELLED, TIMED_OUT | none |
+| RETRYING | QUEUED, CANCELLED |
+| TIMED_OUT | RETRYING, DEAD_LETTER |
+| SUCCEEDED, DEAD_LETTER, CANCELLED | none |
 
 Unknown/self/absent edges fail without changing the Job. The graph is centralized
 in domain; durable authority requires repository transactions and SQL fences.
-There is no HTTP state-change endpoint. Priority/timeout/user cancellation and
-DLQ management remain planned, despite reserved graph states.
+HTTP exposes explicit Cancel and Redrive commands, not arbitrary state mutation.
 
 ```mermaid
 stateDiagram-v2
@@ -39,7 +39,7 @@ Duplicate delivery, failed claim, replay and retry promotion consume no budget.
 No N+1 Attempt is created after exhaustion. Sequence and old Attempts are retained.
 
 Attempt states record execution, not scheduling: RUNNING, SUCCEEDED, FAILED and
-reserved TIMED_OUT/CANCELLED. A failed Attempt records stable error/result/end time;
+TIMED_OUT/CANCELLED. A failed Attempt records stable error/result/end time;
 the corresponding Job may be RETRYING or DEAD_LETTER. Success Job/Attempt share
 result and completion time. Historical attempts need not match current Job status.
 
@@ -76,7 +76,7 @@ or retention management is added. Healthy worker/DB/Redis are required for progr
 ## Submission idempotency
 
 The exact non-null global key identifies canonical type, JSONB payload, priority,
-max_attempts and timeout. First submission returns 201; same request replay returns
+original submission max_attempts and timeout. First submission returns 201; same request replay returns
 200 with original Job/Location at any state; different request returns 409
 IDEMPOTENCY_CONFLICT and changes nothing. Null/absent keys always create distinct
 Jobs. Replay creates no Attempt/intent and does not restart terminal work.
@@ -94,3 +94,43 @@ over-budget <=100 counts freeze max_attempts at the actual count and exhausted
 QUEUED Jobs normalize administratively to DEAD_LETTER, preserving history.
 Legacy RETRYING gets a DB-time one-second schedule. Down removes new objects but
 never erases history or restarts normalized work. Stop workers before schema changes.
+
+## Priority and attempt deadline
+
+Claim snapshots rank eligible QUEUED by priority DESC / created_at ASC / id ASC;
+RUNNING is never preempted. Lower-ranked deferral changes no Job/Attempt/budget.
+Bounded peer-claim waits precede ACK; intent reconciliation is at 30 seconds.
+Aging/fairness and strict global FIFO are unimplemented; high backlog may starve.
+Retry promotion and manual redrive rejoin ordinary priority eligibility.
+
+Worker deadline starts at executor invocation, excludes queuing/backoff, and
+stops renewal at timeout. Timeout is retryable: RUNNING -> TIMED_OUT -> RETRYING
+when budget remains, otherwise -> DEAD_LETTER. TIMED_OUT is an intermediate Job
+graph outcome, preserved as the completed Attempt status/error execution_timeout.
+No externally observable persisted TIMED_OUT Job is required. Historical such
+rows are retained, without automatic retry. Finalize retains all owner/attempt/
+unexpired-lease fences; DB failure leaves RUNNING for expiry recovery and no ACK.
+
+## Cancellation and manual redrive
+
+QUEUED/RETRYING cancellation atomically persists CANCELLED, clears retry_at and
+invalidates intent. RUNNING cancellation persists cancel_requested_at while Job
+remains RUNNING; the executor stops cooperatively at the renewal check. Finalize
+and Cancel lock the same row: a committed request overrides late local success
+or timeout with Job/Attempt CANCELLED + user_cancelled. If successful Finalize wins
+first, Cancel conflicts. Crash-after-request recovery also CANCELLED with no retry.
+SKIP LOCKED may settle at the next scan. No cancellation path creates extra Attempt.
+Operational interruption execution_cancelled still follows the retry policy.
+
+Repeated CANCELLED cancel succeeds; other terminal states conflict. Manual redrive
+accepts only DEAD_LETTER below max budget 100, atomically increases max_attempts by
+one and restores QUEUED/intent. It is a controlled management exception, never an
+ordinary DEAD_LETTER -> QUEUED graph edge. Old Attempts/count remain, terminal
+metadata clears; Claim creates the next Attempt. Original submission budget is
+immutable for replay even after redrive. DLQ uses bounded creation-time pagination;
+Attempts returns full ordered history. No per-job persistent logs or DLQ UI.
+
+Append-only 000006 provides cancellation metadata, original budget and partial
+indexes, without changing 000001–000005 or resolving retained legacy keys. Its
+down loses cancellation/original-budget metadata; stop processes before schema
+changes and do not use rollback to resume work. Old/new binaries cannot mix.

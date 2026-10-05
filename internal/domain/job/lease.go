@@ -30,5 +30,13 @@ func (j *Job) RecoverExpired(now time.Time) error {
 	if j.Status != Running || j.AssignedWorker == nil || *j.AssignedWorker == uuid.Nil || j.AttemptCount < 1 || j.LeaseExpiry == nil || j.LeaseExpiry.After(now) {
 		return ErrLeaseLost
 	}
+	if j.CancelRequestedAt != nil {
+		if err := j.Transition(Cancelled); err != nil {
+			return err
+		}
+		j.LeaseExpiry, j.RetryAt = nil, nil
+		j.FinishedAt = &now
+		return nil
+	}
 	return j.Fail(Failure{Retryable, "lease_expired"}, now, time.Second)
 }

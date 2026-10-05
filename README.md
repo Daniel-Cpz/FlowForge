@@ -93,6 +93,10 @@ commitment was found. `offset` now returns 400.
 | POST | `/api/v1/jobs` | First create/no key 201; keyed replay 200; key conflict 409; Location identifies original Job |
 | GET | `/api/v1/jobs/{id}` | Job by UUID; 404 if absent, 400 if malformed |
 | GET | `/api/v1/jobs?limit=20&cursor=...` | Exclusive cursor pagination by `(created_at DESC, id DESC)` |
+| POST | `/api/v1/jobs/{id}/cancel` | Durable user cancellation; 200 idempotent CANCELLED, 409 other terminal states |
+| GET | `/api/v1/dead-letter?limit=20&cursor=...` | DEAD_LETTER only, same creation-time cursor order |
+| GET | `/api/v1/jobs/{id}/attempts` | Complete history ordered by attempt_number (at most 100) |
+| POST | `/api/v1/jobs/{id}/retry` | Explicit DEAD_LETTER redrive, +1 budget up to 100, history retained |
 
 | Create field | Missing | Explicit null | Supplied value |
 |---|---|---|---|
@@ -120,8 +124,8 @@ request envelope rejects duplicates; no recursive custom parser is introduced.
 
 `attempt_count` starts at 0. Unset result, worker, lease and execution timestamps
 serialize as null at creation. Time strings are RFC3339 with optional fractional seconds in
-UTC. A non-null idempotency key is an exact global submission key: same canonical request returns the original Job (200), different request returns 409 `IDEMPOTENCY_CONFLICT`. Null/absent keys always create distinct Jobs. Canonical identity is trimmed type, JSONB-semantic payload, priority, max_attempts and timeout; generated ID/time are excluded. Replay works at RUNNING/RETRYING/terminal states and never redispatches.
-Timeout and priority are stored metadata and are not enforced during execution.
+UTC. A non-null idempotency key is an exact global submission key: same canonical request returns the original Job (200), different request returns 409 `IDEMPOTENCY_CONFLICT`. Null/absent keys always create distinct Jobs. Canonical identity is trimmed type, JSONB-semantic payload, priority, original submission max_attempts and timeout; generated ID/time are excluded. Replay works at RUNNING/RETRYING/terminal states and never redispatches.
+Priority now governs PostgreSQL Claim; timeout is an attempt execution deadline in seconds. Original submission max_attempts is stored separately from redrive-adjusted execution budget, so keyed replay still compares the original request. Control POST endpoints require no body or query; Attempts accepts no query parameters.
 First create returns the QUEUED representation captured in its Job/outbox transaction;
 a subsequent GET may already show execution progress. JSONB may normalize
 spacing, key order, numeric notation and nested duplicate keys. GET returns the
@@ -194,11 +198,11 @@ effect. Lease fencing protects DB writes, not arbitrary external effects.
 See [worker operations](docs/worker-operations.md) and
 [ADR 0006](docs/decisions/0006-budgeted-retries-and-submission-idempotency.md).
 
-Run `./scripts/phase5-smoke.ps1` in PowerShell for isolated real API/idempotency
-and process-restart retry evidence. It builds a separate image and uses a generated
-DB/key/API port; existing development services/data remain intact. Phase 3/4 smoke
+Run `./scripts/phase6-smoke.ps1` in PowerShell for isolated real API/idempotency
+and priority/timeout/cancellation/DLQ evidence. It builds a separate image and uses a generated
+DB/key/API port; existing development services/data remain intact. Phase 3/4/5 smoke
 scripts are historical fixtures for their tagged checkpoints, whose FAILED and
-immediate-requeue contracts Phase 5 supersedes.
+immediate-requeue contracts Phase 6 supersedes.
 
 List accepts only `limit` (default 20, range 1–100) and optional `cursor`.
 Unknown/repeated query parameters, invalid limits and malformed query encoding
@@ -226,11 +230,53 @@ constructed cursor is accepted; clients must treat its encoding as opaque.
 
 Errors use `{"error":{"code":"JOB_NOT_FOUND","message":"job not found"}}`.
 Codes distinguish `INVALID_JSON`, `INVALID_INPUT`, `INVALID_ID`, `INVALID_CURSOR`,
-`BODY_TOO_LARGE`, `JOB_NOT_FOUND`, `IDEMPOTENCY_CONFLICT` and `INTERNAL_ERROR`. Dependency failures,
+`BODY_TOO_LARGE`, `JOB_NOT_FOUND`, `IDEMPOTENCY_CONFLICT`, `JOB_CONTROL_CONFLICT` and `INTERNAL_ERROR`. Dependency failures,
 unexpected constraint failures and corrupt stored data return a generic 500;
 raw driver errors and secrets are not sent to clients. Readiness failures return
 a generic 503.
 
+### Priority, execution timeout and user control
+
+Priority is non-preemptive: pending publication and Claim rank eligible QUEUED Jobs
+by priority DESC, created_at ASC, id ASC. A short transaction advisory lock serializes
+Claim decisions; a conditional SQL check rejects a lower-ranked delivery without
+an Attempt or budget change. Three 250ms waits permit peer claims to commit;
+a still-deferred notification is ACKed and durable QUEUED intent is reconstructed
+on the existing 30s cadence. Running Jobs are never preempted. High backlog can
+starve lower priority; aging/fairness and strict global FIFO are not implemented.
+
+The Worker starts a context deadline immediately before executor invocation,
+excluding queue/retry/backoff time. SLEEP honors it. TIMED_OUT records
+execution_timeout; the Job follows RUNNING -> TIMED_OUT -> RETRYING or DEAD_LETTER
+under the same total budget. Renewal stops at deadline and joins before fenced
+Finalize. A DB error retains RUNNING/pending for recovery, without false ACK.
+
+Cancel QUEUED/RETRYING atomically persists CANCELLED, clears retry_at and removes
+intent. Old delivery is harmless. Cancel RUNNING records cancel_requested_at;
+GET may still show RUNNING until the current owner observes it at the renewal
+interval and cooperatively cancels execution. Finalize locks the same row and
+honors committed user intent even if local execution returned late success.
+Expired-lease recovery settles requested cancellation as CANCELLED, never retry.
+SKIP LOCKED may defer settlement to the next scan. Cancellation creates no Attempt;
+user_cancelled differs from retryable process interruption execution_cancelled.
+CANCELLED repeated cancel is 200; other terminal states and invalid redrive are
+409 JOB_CONTROL_CONFLICT. No authentication/authorization subsystem is added.
+
+DLQ list uses the same bounded creation-time cursor contract as Job list, filtered
+to DEAD_LETTER. It is not a snapshot. Attempts inspect returns complete preserved
+history and stable error codes. Explicit retry/redrive locks DEAD_LETTER, raises
+max_attempts by one (up to 100), retains attempt_count/history, clears terminal
+metadata and resets dispatch intent atomically. A concurrent redrive conflicts;
+only the next normal Claim creates the new Attempt. Original submission budget
+remains immutable for keyed replay. Persistent per-job logs, DLQ UI and external
+business exactly-once effects remain unimplemented. See [ADR 0007](docs/decisions/0007-priority-timeout-cancellation-dlq.md).
+
+Migration 000006 appends cancellation metadata, original submission budget and
+priority/DLQ indexes. It does not bypass 000005 preflight: the retained development
+DB still has one legacy duplicate-key group and may remain on Phase 4 until
+explicit operator resolution. Acceptance uses isolated compatible DBs. Stop
+workers before down; rolling back 000006 loses cancellation intent and original
+submission-budget metadata, so it is not an operational recovery mechanism.
 ### Local Go development
 
 Go commands do not load `.env`. Export its variables in your shell first. With
@@ -274,7 +320,7 @@ tests, set `FLOWFORGE_TEST_REDIS_ADDR` (and optional
 
 In Docker, migrations can also run with
 `docker compose run --rm migrate /app/migrate up` (or `down`). Stop API/worker
-before rolling back schema. Five `down` calls remove retry schema, workers, outbox, attempts and jobs.
+before rolling back schema. Six `down` calls remove execution control, retry schema, workers, outbox, attempts and jobs.
 Migration 000003 backfills dispatch intent for existing QUEUED Jobs. Starting the
 Phase 2 worker therefore processes existing queued work; unsupported legacy
 types become DEAD_LETTER under Phase 5. Migration 000004 adds liveness and expiry indexes; pre-lease
@@ -339,6 +385,11 @@ outbox history have no automatic retention/cleanup yet. All ports bind to loopba
 - Concurrent retry promotion with atomic dispatch-intent reconstruction
 - Global exact-key submission idempotency, explicit 201/200/409 HTTP semantics
 - Concurrent replay/conflict/migration tests and independent-process retry smoke
+- PostgreSQL priority Claim arbitration and stable non-preemptive ordering
+- Attempt deadlines with TIMED_OUT history and budgeted retry/exhaustion
+- Durable queued/retrying/running cancellation and cancellation-aware lease recovery
+- DEAD_LETTER pagination, Attempts inspect, and atomic manual redrive (+1 budget)
+- Phase 6 control/race/rollback regressions and isolated API/process smoke
 
 ### Experimental
 
@@ -346,7 +397,7 @@ None. SLEEP crash recovery is tested; production hardening remains planned.
 
 ### Planned
 
-Scheduling, priority, timeout/user-cancellation execution policies, DLQ management,
+Scheduled/capability-aware scheduling, priority aging, persistent per-job logs, DLQ UI,
 dashboard, metrics/tracing, failure injection, benchmarking and cloud deployment.
 
 ## Roadmap
@@ -355,13 +406,14 @@ Phase 1 delivers **Job Persistence + API Correctness**. Phase 2 implements
 **Redis Queue + Single Worker Execution** with a durable database outbox.
 Phase 3 implements **Multiple Workers + Bounded Concurrency**.
 Phase 4 implements **Heartbeat + Lease + Crash Recovery**.
-Phase 5 implements **Retry + Backoff + Jitter + Submission Idempotency**. Further phase scope requires external review and a prepared next prompt; Codex has not generated one.
+Phase 5 implements **Retry + Backoff + Jitter + Submission Idempotency**. Phase 6 implements **Priority + Execution Timeout + User Cancellation + Dead Letter Management**. Phase 7 scheduled/capability-aware scheduling remains Planned and requires external review and a prepared prompt.
 See the [Phase 0–10 roadmap](docs/development-roadmap.md) and authoritative phase state.
 The [Phase 1 report](docs/reports/phase-1-report.md) records its validation and Git checkpoint.
 The [Phase 2 report](docs/reports/phase-2-report.md) records execution/durability evidence.
 The [Phase 3 report](docs/reports/phase-3-report.md) records concurrency/process evidence.
 The [Phase 4 report](docs/reports/phase-4-report.md) records lease/fencing/recovery evidence.
 The [Phase 5 report](docs/reports/phase-5-report.md) records retry/idempotency/migration evidence.
+The [Phase 6 report](docs/reports/phase-6-report.md) records scheduling/control/DLQ evidence.
 This repository does not claim exactly-once execution. Delivery is at-least-once;
 business side effects need their own idempotency safeguards.
 
@@ -387,7 +439,7 @@ phase report and real Git evidence pass their gates. The separate infrastructure
 report does not complete Phase 1.
 
 FlowForge supports both manual and automation-generated phase prompts. The
-current Phase 5 prompt is `automation`, at `automation/prompts/phase-5.md`.
+current Phase 6 prompt is `automation`, at `automation/prompts/phase-6.md`.
 Phase 1 used manual input, with no prompt file required.
 Automated prompts must have an existing current-phase file.
 `prompt_path` tracks the current phase's source; `next_prompt` tracks an externally

@@ -62,10 +62,26 @@ func (s *Service) GetByID(ctx context.Context, id uuid.UUID) (*domain.Job, error
 }
 
 func (s *Service) List(ctx context.Context, limit int, after *domain.PageCursor) (*domain.Page, error) {
+	return s.list(ctx, limit, after, false)
+}
+func (s *Service) ListDeadLetter(ctx context.Context, limit int, after *domain.PageCursor) (*domain.Page, error) {
+	return s.list(ctx, limit, after, true)
+}
+func (s *Service) list(ctx context.Context, limit int, after *domain.PageCursor, dead bool) (*domain.Page, error) {
 	if limit < 1 || limit > 100 || (after != nil && !after.Valid()) {
 		return nil, domain.ErrInvalidInput
 	}
-	jobs, err := s.repo.List(ctx, limit+1, after)
+	var jobs []domain.Job
+	var err error
+	if dead {
+		if repo, ok := s.repo.(domain.ControlRepository); ok {
+			jobs, err = repo.ListDeadLetter(ctx, limit+1, after)
+		} else {
+			return nil, domain.ErrInvalidStoredData
+		}
+	} else {
+		jobs, err = s.repo.List(ctx, limit+1, after)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -79,4 +95,35 @@ func (s *Service) List(ctx context.Context, limit int, after *domain.PageCursor)
 		page.NextCursor = &domain.PageCursor{CreatedAt: last.CreatedAt, ID: last.ID}
 	}
 	return page, nil
+}
+
+func (s *Service) Cancel(ctx context.Context, id uuid.UUID) (*domain.Job, error) {
+	if id == uuid.Nil {
+		return nil, domain.ErrInvalidInput
+	}
+	repo, ok := s.repo.(domain.ControlRepository)
+	if !ok {
+		return nil, domain.ErrInvalidStoredData
+	}
+	return repo.Cancel(ctx, id)
+}
+func (s *Service) Redrive(ctx context.Context, id uuid.UUID) (*domain.Job, error) {
+	if id == uuid.Nil {
+		return nil, domain.ErrInvalidInput
+	}
+	repo, ok := s.repo.(domain.ControlRepository)
+	if !ok {
+		return nil, domain.ErrInvalidStoredData
+	}
+	return repo.RedriveDeadLetter(ctx, id)
+}
+func (s *Service) Attempts(ctx context.Context, id uuid.UUID) ([]domain.Attempt, error) {
+	if id == uuid.Nil {
+		return nil, domain.ErrInvalidInput
+	}
+	repo, ok := s.repo.(domain.ControlRepository)
+	if !ok {
+		return nil, domain.ErrInvalidStoredData
+	}
+	return repo.Attempts(ctx, id)
 }

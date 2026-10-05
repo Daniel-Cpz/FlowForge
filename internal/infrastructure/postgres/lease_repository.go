@@ -71,15 +71,19 @@ func (r *JobRepository) Renew(ctx context.Context, j *job.Job) (time.Time, error
 	ctx, cancel := context.WithTimeout(ctx, min(3*time.Second, r.leasePolicy.RenewInterval))
 	defer cancel()
 	var expiry time.Time
+	var requested *time.Time
 	err := r.pool.QueryRow(ctx, `WITH live_worker AS (SELECT worker_id FROM workers
  WHERE worker_id=$2 AND status IN ('ONLINE','IDLE','BUSY')
  AND last_heartbeat>clock_timestamp()-make_interval(secs=>$5) FOR SHARE)
  UPDATE jobs SET lease_expiry=clock_timestamp()+make_interval(secs=>$4)
  WHERE id=$1 AND status='RUNNING' AND assigned_worker=$2 AND attempt_count=$3 AND lease_expiry>clock_timestamp()
- AND EXISTS(SELECT 1 FROM live_worker) RETURNING lease_expiry`,
-		j.ID, *j.AssignedWorker, j.AttemptCount, r.leasePolicy.LeaseDuration.Seconds(), r.leasePolicy.OfflineAfter.Seconds()).Scan(&expiry)
+ AND EXISTS(SELECT 1 FROM live_worker) RETURNING lease_expiry,cancel_requested_at`,
+		j.ID, *j.AssignedWorker, j.AttemptCount, r.leasePolicy.LeaseDuration.Seconds(), r.leasePolicy.OfflineAfter.Seconds()).Scan(&expiry, &requested)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return time.Time{}, job.ErrLeaseLost
+	}
+	if err == nil && requested != nil {
+		return expiry.UTC(), job.ErrCancellationRequested
 	}
 	return expiry.UTC(), err
 }

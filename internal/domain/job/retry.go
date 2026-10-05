@@ -34,11 +34,19 @@ func (f Failure) Valid() bool {
 // Fail applies the ordinary graph in order, retaining the Attempt separately.
 // now must be database time. Only the repository can persist this decision.
 func (j *Job) Fail(f Failure, now time.Time, delay time.Duration) error {
+	return j.FailOutcome(Failed, f, now, delay)
+}
+
+// FailOutcome preserves the distinct FAILED / TIMED_OUT Attempt outcome.
+func (j *Job) FailOutcome(outcome Status, f Failure, now time.Time, delay time.Duration) error {
+	if outcome != Failed && outcome != TimedOut {
+		return ErrInvalidInput
+	}
 	if !f.Valid() || j.Status != Running || j.AttemptCount < 1 || j.AttemptCount > j.MaxAttempts || !validTime(now) || delay <= 0 {
 		return ErrInvalidInput
 	}
 	copy := *j
-	if err := copy.Transition(Failed); err != nil {
+	if err := copy.Transition(outcome); err != nil {
 		return err
 	}
 	target := DeadLetter

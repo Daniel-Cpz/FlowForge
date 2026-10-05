@@ -8,10 +8,10 @@ func CanTransition(from, to Status) bool {
 		return to == Running || to == Cancelled
 	case Running:
 		return to == Succeeded || to == Failed || to == TimedOut || to == Cancelled
-	case Failed:
+	case Failed, TimedOut:
 		return to == Retrying || to == DeadLetter
 	case Retrying:
-		return to == Queued
+		return to == Queued || to == Cancelled
 	default:
 		return false
 	}

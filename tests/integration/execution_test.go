@@ -467,7 +467,10 @@ func TestWorkerGracefulIdleAndSleepShutdown(t *testing.T) {
 func TestOutboxMigrationBackfillAndDown(t *testing.T) {
 	pool := migratedDatabase(t)
 	ctx := t.Context()
-	// Remove appended retry and worker migrations before historical outbox down.
+	// Remove execution control, retry and worker migrations before historical outbox down.
+	if err := migrations.Run(ctx, pool, "down"); err != nil {
+		t.Fatal(err)
+	}
 	if err := migrations.Run(ctx, pool, "down"); err != nil {
 		t.Fatal(err)
 	}
@@ -492,7 +495,7 @@ func TestOutboxMigrationBackfillAndDown(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM job_dispatch WHERE job_id=$1 AND published_at IS NULL`, id).Scan(&count); err != nil || count != 1 {
 		t.Fatal("existing queued job backfill failed", err)
 	}
-	for range 5 {
+	for range 6 {
 		if err := migrations.Run(ctx, pool, "down"); err != nil {
 			t.Fatal(err)
 		}

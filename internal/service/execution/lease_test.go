@@ -25,7 +25,7 @@ type lifecycleStore struct {
 
 func TestStaleFinalizeLogsRejectionWithoutACK(t *testing.T) {
 	id := uuid.New()
-	s := &fakeStore{j: &job.Job{ID: id, Status: job.Queued}, finishErr: job.ErrLeaseLost}
+	s := &fakeStore{j: &job.Job{ID: id, Status: job.Queued, Timeout: 300}, finishErr: job.ErrLeaseLost}
 	q := &fakeQueue{}
 	var logs bytes.Buffer
 	w := New(s, q, &fakeExecutor{}, slog.New(slog.NewJSONHandler(&logs, nil)))

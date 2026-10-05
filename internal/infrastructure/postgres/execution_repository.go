@@ -23,7 +23,8 @@ func (r *JobRepository) PendingDispatch(ctx context.Context, limit int) ([]uuid.
 	defer cancel()
 	rows, err := r.pool.Query(ctx, `SELECT d.job_id FROM job_dispatch d JOIN jobs j ON j.id=d.job_id
 	 WHERE j.status=$1 AND (d.published_at IS NULL OR d.published_at < CURRENT_TIMESTAMP - INTERVAL '30 seconds')
-	 ORDER BY d.published_at NULLS FIRST, d.created_at, d.job_id LIMIT $2`, job.Queued, limit)
+	 AND j.attempt_count<j.max_attempts
+	 ORDER BY j.priority DESC, j.created_at ASC, j.id ASC LIMIT $2`, job.Queued, limit)
 	if err != nil {
 		return nil, fmt.Errorf("pending dispatch: %w", err)
 	}
@@ -77,10 +78,35 @@ func (r *JobRepository) Claim(ctx context.Context, id, worker uuid.UUID) (*job.J
 	if err != nil {
 		return nil, err
 	}
+	// Only the short scheduling decision is serialized, never execution. A
+	// transaction-scoped lock avoids two snapshots skipping the same backlog.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(704621831)`); err != nil {
+		return nil, err
+	}
+	var first uuid.UUID
+	err = tx.QueryRow(ctx, `SELECT id FROM jobs WHERE status='QUEUED' AND attempt_count<max_attempts ORDER BY priority DESC,created_at,id LIMIT 1`).Scan(&first)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, job.ErrInvalidTransition
+	}
+	if err != nil {
+		return nil, err
+	}
+	if first != id {
+		var eligible bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM jobs WHERE id=$1 AND status='QUEUED' AND attempt_count<max_attempts)`, id).Scan(&eligible); err != nil {
+			return nil, err
+		}
+		if eligible {
+			return nil, job.ErrPriorityDeferred
+		}
+		return nil, job.ErrInvalidTransition
+	}
 	j, err := scanJob(tx.QueryRow(ctx, `UPDATE jobs SET status=$2, assigned_worker=$3,
 	 attempt_count=attempt_count+1, started_at=clock_timestamp(), finished_at=NULL, result=NULL,
 	 lease_expiry=clock_timestamp()+make_interval(secs=>$5)
 	 WHERE id=$1 AND status=$4 AND attempt_count<max_attempts
+	 AND NOT EXISTS(SELECT 1 FROM jobs p WHERE p.status='QUEUED' AND p.attempt_count<p.max_attempts
+	 AND (p.priority>jobs.priority OR (p.priority=jobs.priority AND (p.created_at,p.id)<(jobs.created_at,jobs.id))))
 	 AND EXISTS(SELECT 1 FROM workers WHERE worker_id=$3 AND status IN ('ONLINE','IDLE','BUSY')
 	 AND last_heartbeat>clock_timestamp()-make_interval(secs=>$6))
 	 RETURNING `+columns, id, job.Running, worker, job.Queued, r.leasePolicy.LeaseDuration.Seconds(), r.leasePolicy.OfflineAfter.Seconds()))
@@ -102,17 +128,20 @@ func (r *JobRepository) Claim(ctx context.Context, id, worker uuid.UUID) (*job.J
 
 // Finalize commits the exact Attempt and its durable outcome before any ACK.
 func (r *JobRepository) Finalize(ctx context.Context, j *job.Job, status job.Status, result json.RawMessage, failures ...job.Failure) error {
-	if j == nil || j.AssignedWorker == nil || j.Status != job.Running || (status != job.Succeeded && status != job.Failed) || !json.Valid(result) || len(failures) > 1 {
+	if j == nil || j.AssignedWorker == nil || j.Status != job.Running || (status != job.Succeeded && status != job.Failed && status != job.TimedOut && status != job.Cancelled) || !json.Valid(result) || len(failures) > 1 {
 		return job.ErrInvalidInput
 	}
 	f := job.Failure{Class: job.Permanent, Code: "execution_failed"}
 	if len(failures) == 1 {
 		f = failures[0]
 	}
-	if status == job.Failed && !f.Valid() {
+	if (status == job.Failed || status == job.TimedOut) && !f.Valid() {
 		return job.ErrInvalidInput
 	}
 	if status == job.Succeeded && len(failures) != 0 {
+		return job.ErrInvalidInput
+	}
+	if status == job.TimedOut && (len(failures) != 1 || f.Class != job.Retryable || f.Code != "execution_timeout") {
 		return job.ErrInvalidInput
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -148,10 +177,19 @@ func (r *JobRepository) finish(ctx context.Context, tx pgx.Tx, current *job.Job,
 	if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
 		return nil, err
 	}
+	// Row lock linearizes user intent against success/timeout/recovery. If the
+	// request won, even a late executor success must settle as user cancellation.
+	if current.CancelRequestedAt != nil {
+		status = job.Cancelled
+		result = json.RawMessage(`{"error":"user_cancelled"}`)
+		f = job.Failure{Class: job.Permanent, Code: "user_cancelled"}
+	} else if status == job.Cancelled {
+		return nil, job.ErrControlConflict
+	}
 	target := *current
 	delay := r.retryPolicy.BaseDelay
 	var code *string
-	if status == job.Failed {
+	if status == job.Failed || status == job.TimedOut {
 		if f.Class == job.Retryable && current.AttemptCount < current.MaxAttempts {
 			var err error
 			delay, err = r.retryPolicy.Delay(current.AttemptCount, r.jitter)
@@ -159,7 +197,7 @@ func (r *JobRepository) finish(ctx context.Context, tx pgx.Tx, current *job.Job,
 				return nil, err
 			}
 		}
-		if err := target.Fail(f, now, delay); err != nil {
+		if err := target.FailOutcome(status, f, now, delay); err != nil {
 			return nil, err
 		}
 		code = &f.Code
@@ -168,6 +206,9 @@ func (r *JobRepository) finish(ctx context.Context, tx pgx.Tx, current *job.Job,
 			return nil, err
 		}
 		target.LeaseExpiry = nil
+		if status == job.Cancelled {
+			code = &f.Code
+		}
 	}
 	predicate := `lease_expiry>clock_timestamp()`
 	if expired {

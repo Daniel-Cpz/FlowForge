@@ -14,7 +14,7 @@ const (
 )
 
 func (s Status) Terminal() bool {
-	return s == Succeeded || s == DeadLetter || s == Cancelled || s == TimedOut
+	return s == Succeeded || s == DeadLetter || s == Cancelled
 }
 
 func (s Status) Valid() bool {

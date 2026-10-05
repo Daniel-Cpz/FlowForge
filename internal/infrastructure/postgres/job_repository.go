@@ -45,7 +45,7 @@ func NewJobRepositoryWithPolicies(pool *pgxpool.Pool, lease worker.LeasePolicy, 
 }
 
 const columns = `id, type, status, priority, payload, result, attempt_count, max_attempts,
- timeout, idempotency_key, assigned_worker, lease_expiry, created_at, started_at, finished_at, retry_at`
+ timeout, idempotency_key, assigned_worker, lease_expiry, created_at, started_at, finished_at, retry_at, cancel_requested_at`
 
 func (r *JobRepository) Create(ctx context.Context, j *job.Job) (job.CreateDisposition, error) {
 	if err := j.Validate(); err != nil {
@@ -58,11 +58,11 @@ func (r *JobRepository) Create(ctx context.Context, j *job.Job) (job.CreateDispo
 		return "", fmt.Errorf("begin create: %w", err)
 	}
 	defer rollback(tx)
-	stored, err := scanJob(tx.QueryRow(ctx, `INSERT INTO jobs (`+columns+`) VALUES
-	 ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+	stored, err := scanJob(tx.QueryRow(ctx, `INSERT INTO jobs (`+columns+`,submission_max_attempts) VALUES
+	 ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$8)
  ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING RETURNING `+columns,
 		j.ID, j.Type, j.Status, j.Priority, j.Payload, j.Result, j.AttemptCount, j.MaxAttempts,
-		j.Timeout, j.IdempotencyKey, j.AssignedWorker, j.LeaseExpiry, j.CreatedAt, j.StartedAt, j.FinishedAt, j.RetryAt))
+		j.Timeout, j.IdempotencyKey, j.AssignedWorker, j.LeaseExpiry, j.CreatedAt, j.StartedAt, j.FinishedAt, j.RetryAt, j.CancelRequestedAt))
 	disposition := job.Created
 	if errors.Is(err, job.ErrNotFound) && j.IdempotencyKey != nil {
 		// A new READ COMMITTED statement sees the committed winning insert after
@@ -70,7 +70,7 @@ func (r *JobRepository) Create(ctx context.Context, j *job.Job) (job.CreateDispo
 		stored, err = scanJob(tx.QueryRow(ctx, `SELECT `+columns+` FROM jobs WHERE idempotency_key=$1 FOR SHARE`, *j.IdempotencyKey))
 		if err == nil {
 			var same bool
-			err = tx.QueryRow(ctx, `SELECT type=$2 AND payload=$3::jsonb AND priority=$4 AND max_attempts=$5 AND timeout=$6 FROM jobs WHERE id=$1`, stored.ID, j.Type, j.Payload, j.Priority, j.MaxAttempts, j.Timeout).Scan(&same)
+			err = tx.QueryRow(ctx, `SELECT type=$2 AND payload=$3::jsonb AND priority=$4 AND submission_max_attempts=$5 AND timeout=$6 FROM jobs WHERE id=$1`, stored.ID, j.Type, j.Payload, j.Priority, j.MaxAttempts, j.Timeout).Scan(&same)
 			if err == nil && !same {
 				return "", job.ErrIdempotencyConflict
 			}
@@ -107,7 +107,7 @@ func rollback(tx pgx.Tx) {
 func scanJob(row pgx.Row) (*job.Job, error) {
 	var j job.Job
 	err := row.Scan(&j.ID, &j.Type, &j.Status, &j.Priority, &j.Payload, &j.Result, &j.AttemptCount,
-		&j.MaxAttempts, &j.Timeout, &j.IdempotencyKey, &j.AssignedWorker, &j.LeaseExpiry, &j.CreatedAt, &j.StartedAt, &j.FinishedAt, &j.RetryAt)
+		&j.MaxAttempts, &j.Timeout, &j.IdempotencyKey, &j.AssignedWorker, &j.LeaseExpiry, &j.CreatedAt, &j.StartedAt, &j.FinishedAt, &j.RetryAt, &j.CancelRequestedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, job.ErrNotFound
 	}
@@ -115,7 +115,7 @@ func scanJob(row pgx.Row) (*job.Job, error) {
 		return nil, fmt.Errorf("scan job: %w", err)
 	}
 	j.CreatedAt = j.CreatedAt.UTC()
-	for _, t := range []*time.Time{j.LeaseExpiry, j.RetryAt, j.StartedAt, j.FinishedAt} {
+	for _, t := range []*time.Time{j.LeaseExpiry, j.RetryAt, j.StartedAt, j.FinishedAt, j.CancelRequestedAt} {
 		if t != nil {
 			*t = t.UTC()
 		}

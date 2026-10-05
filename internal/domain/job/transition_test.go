@@ -10,7 +10,8 @@ func TestTransitions(t *testing.T) {
 	allowed := map[[2]Status]bool{
 		{Queued, Running}: true, {Queued, Cancelled}: true,
 		{Running, Succeeded}: true, {Running, Failed}: true, {Running, TimedOut}: true, {Running, Cancelled}: true,
-		{Failed, Retrying}: true, {Failed, DeadLetter}: true, {Retrying, Queued}: true,
+		{Failed, Retrying}: true, {Failed, DeadLetter}: true, {Retrying, Queued}: true, {Retrying, Cancelled}: true,
+		{TimedOut, Retrying}: true, {TimedOut, DeadLetter}: true,
 	}
 	for _, from := range states {
 		for _, to := range states {
@@ -36,12 +37,12 @@ func TestTransitions(t *testing.T) {
 }
 
 func TestTerminalStates(t *testing.T) {
-	for _, s := range []Status{Succeeded, DeadLetter, Cancelled, TimedOut} {
+	for _, s := range []Status{Succeeded, DeadLetter, Cancelled} {
 		if !s.Terminal() {
 			t.Errorf("%s must be terminal", s)
 		}
 	}
-	for _, s := range []Status{Queued, Running, Failed, Retrying, "UNKNOWN"} {
+	for _, s := range []Status{Queued, Running, Failed, Retrying, TimedOut, "UNKNOWN"} {
 		if s.Terminal() {
 			t.Errorf("%s must not be terminal", s)
 		}

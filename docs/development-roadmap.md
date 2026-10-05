@@ -1,8 +1,8 @@
 # Development roadmap
 
-Phases 0–5 are implemented: foundation, strict API/persistence, durable dispatch,
-SLEEP execution, multiple workers with bounded concurrency, DB-time lease recovery, budgeted retry/backoff/jitter and submission idempotency.
-Phase 6 onward remains Planned. Authoritative completion status is in
+Phases 0–6 are implemented: foundation, strict API/persistence, durable dispatch,
+SLEEP execution, multiple workers with bounded concurrency, DB-time lease recovery, budgeted retries/idempotency and priority/timeout/cancellation/DLQ controls.
+Phase 7 onward remains Planned. Authoritative completion status is in
 [`automation/state.json`](../automation/state.json). The whole-project
 [`README.md`](../README.md) and each independent report are required on completion.
 See the [protocol](phase-automation.md) and [report template](phase-report-template.md).
@@ -23,11 +23,14 @@ See the [protocol](phase-automation.md) and [report template](phase-report-templ
 
 ## Current completion and next handoff
 
-Phase 5 unifies execution attempt budgets, durable RETRYING schedules, concurrent
-promotion, bounded equal jitter, failure classification and global submission
-idempotency. Permanent/exhausted failures end DEAD_LETTER. It does not implement
-priority, generic timeout enforcement, user cancellation or DLQ management.
+Phase 6 adds PostgreSQL-authoritative non-preemptive priority, attempt execution
+timeouts with budgeted TIMED_OUT outcomes, durable user cancellation and minimal
+DLQ pagination/Attempts inspect/manual redrive. Historical Attempts are preserved;
+redrive explicitly grants one extra budget and original submission identity stays
+unchanged. Priority aging, persistent logs and DLQ UI are unimplemented.
 
-External Automation must review the Phase 5 report and publish a legitimate next
-prompt. Phase 6 is the existing roadmap recommendation only; Codex has not
-created a Phase 6 prompt, advanced its processed counter or started that scope.
+Phase 7 scheduled/capability-aware scheduling remains Planned. External Automation
+must review the Phase 6 report and publish a legitimate next prompt before Codex
+starts another phase. Codex has not generated that prompt or advanced processed
+phase to 6. The retained legacy duplicate-key DB still requires explicit operator
+resolution before upgrading from Phase 4; isolated acceptance is not deployment.

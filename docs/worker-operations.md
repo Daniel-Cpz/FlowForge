@@ -1,4 +1,4 @@
-# Worker operations — Phase 5
+# Worker operations — Phase 6
 
 Each process has C fixed slots, one dispatcher, heartbeat and maintenance loop,
 and at most C execution renewers. Consumers use fresh process UUID + slot;
@@ -57,8 +57,8 @@ QUEUED rows normalize to DEAD_LETTER with attempt_budget_exhausted. All Attempt
 history remains. This administrative normalization may change legacy request
 max_attempts metadata; replay compares the current normalized canonical fields.
 Preexisting FAILED outcomes are preserved and not automatically resubmitted.
-Stop all old processes, migrate, then start the compatible binaries. Five down
-calls remove retry schema, registry, dispatch, Attempts and Jobs; never use down
+Stop all old processes, migrate, then start the compatible binaries. Six down
+calls remove control, retry schema, registry, dispatch, Attempts and Jobs; never use down
 as recovery. Normalized outcomes/counters are not reversed by 000005 down.
 
 ## Durable scheduling and inspection
@@ -70,7 +70,7 @@ RETRYING or DEAD_LETTER. job_dispatch publication is notification evidence only.
 Claim creates an Attempt only if count<max_attempts and registry is fresh/live.
 Unsupported type/invalid SLEEP are permanent. execution_cancelled and lease_expired
 are retryable but consume budget. Remaining budget schedules RETRYING; permanent
-or exhausted ends DEAD_LETTER. There is no DLQ management/user cancellation API.
+or exhausted ends DEAD_LETTER. DLQ and cancellation commands are available as documented below.
 
 Maintenance recovers <=100 expired executions, then promotes <=100 due retries,
 then detects <=100 offline workers per cycle. SKIP LOCKED and conditional DB fences
@@ -117,23 +117,59 @@ Stream, consumers, outbox and key retention are unbounded; no production orchest
 ## Repeatable acceptance
 
 ```powershell
-./scripts/phase5-smoke.ps1
+./scripts/phase6-smoke.ps1
 ```
 
 Requires existing standard development PostgreSQL/Redis and create/drop DB rights.
-Builds a separate Phase 5 image, starts a generated isolated DB/stream, API on an
-available loopback port, and separate worker processes. Concurrent keyed POSTs
-verify 1x201 + 7x200, same ID/Location, one Job/intent, conflicting request 409,
-and distinct no-key Jobs. SIGTERM first SLEEP owner verifies FAILED cancellation
-Attempt and durable RETRYING; a fresh process starts before due and creates no
-early Attempt, then promotes and succeeds as Attempt 2. The script cleans only
-its generated containers/database/key; existing services/data/images stay intact.
-PASS prints only after cleanup succeeds. Test image is retained as a build artifact
-outside Git. This is correctness evidence, not a benchmark.
+Builds a separate Phase 6 image, generated disposable DB/Redis namespace, loopback
+API port and C=1 process. A long running low-priority SLEEP establishes a claim
+barrier. High/low queued jobs remain unclaimed; cancel releases the barrier and
+high starts first. SLEEP timeout records two TIMED_OUT Attempts and exact budget
+exhaustion. DLQ list/Attempts/retry retain history, grant one budget, and preserve
+keyed replay. PASS prints after generated containers/DB/key cleanup. Normal
+services/images/data remain intact; the smoke image/cache remains outside Git.
+Historical Phase 3/4/5 scripts apply only to their tagged checkpoint contracts.
+Integration tests instead use verified random
+schemas and stream keys, never application data or FLUSHDB. See Phase 6 report
+and ADR 0007 for current evidence and migration limitations.
 
-Phase 3/4 smoke scripts remain historical fixtures for their own tagged checkpoints;
-their FAILED/immediate-requeue assertions are superseded by Phase 5. Do not run
-those old scripts against Phase 5 and assume their contracts still apply. Their
-reports remain immutable evidence. Integration tests instead use verified random
-schemas and stream keys, never application data or FLUSHDB. See Phase 5 report
-and ADR 0006 for current evidence and migration limitations.
+## Priority, timeout and user control
+
+Claim decisions are short serialized PostgreSQL transactions ranked by priority
+DESC / created_at ASC / id ASC. Running work is non-preemptive. Three 250ms peer
+waits bound a deferred delivery; remaining deferral ACKs notification only and uses
+30s intent reconciliation. High backlog may starve lows; no aging/FIFO SLA.
+
+Job.timeout is seconds from executor invocation, not queue/backoff. Executor must
+honor context; SLEEP does. TIMED_OUT / execution_timeout is retryable under the
+same budget. Deadline stops renewal; renewer joins before fenced Finalize. DB errors
+leave RUNNING/pending and expiry recovery truth. No arbitrary shell/process killer.
+
+POST /api/v1/jobs/{id}/cancel has no body/query. QUEUED/RETRYING ends CANCELLED and
+removes intent. RUNNING returns durable cancel_requested_at, still RUNNING until
+cooperative observation at the configured renewal interval (default 5s). This is
+not a wall-clock SLA: DB latency/availability and scheduling matter. Cancellation
+intent wins late completion if committed first; expired owner is fenced out and
+recovery honors the request. SKIP LOCKED may require another maintenance pass.
+Repeated CANCELLED is 200; other terminal state is 409 JOB_CONTROL_CONFLICT.
+
+GET /api/v1/dead-letter?limit=20&cursor=... filters DEAD_LETTER using existing
+creation-time cursor order (descending UUID tie-breaker), with no snapshot promise.
+GET /api/v1/jobs/{id}/attempts exposes complete ordered history, at most 100; raw
+legacy error text is redacted to execution_error. There is no persistent per-job
+log store. POST /api/v1/jobs/{id}/retry is explicit manual redrive: +1 max_attempts
+up to 100, unchanged count/history, cleared old terminal fields and reset intent
+in one transaction. Invalid/concurrent second redrive conflicts. Original submission
+budget remains canonical, so replay does not need the new administrative budget.
+No authorization layer/DLQ UI is added by this local development phase.
+
+New events: priority_deferred, cancellation_observed, job_cancel_requested,
+job_redriven; recovery_settled may now show CANCELLED. user_cancelled never retries;
+execution_cancelled remains operational interruption. Attempt TIMED_OUT retains
+execution_timeout separately from Job RETRYING/DEAD_LETTER.
+
+The retained development DB still has one legacy duplicate-key group; no Phase 6
+migration or smoke mutates it. Normal services may remain on Phase 4 schema until
+explicit operator resolution permits 000005+, then 000006. 000006 down loses durable
+cancel intent and original submission budgets: stop workers and evaluate data
+before rolling back. It is not crash recovery or a safe mixed-version rollout.

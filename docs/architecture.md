@@ -1,6 +1,6 @@
 # Architecture
 
-Status: Phases 0–5 implemented. PostgreSQL is authoritative; Redis transports notifications.
+Status: Phases 0–6 implemented. PostgreSQL is authoritative; Redis transports notifications.
 
 ## Boundaries
 
@@ -22,7 +22,7 @@ The global exact non-null key unique index arbitrates concurrent writers.
 The first writer inserts Job and dispatch intent in one transaction (201).
 A conflicting insert reads the committed winner using a new READ COMMITTED
 statement, locks it for comparison, and compares type, JSONB payload, priority,
-max_attempts and timeout in PostgreSQL. Equal canonical input returns the original
+original submission_max_attempts and timeout in PostgreSQL. Equal canonical input returns the original
 Job (200), including its current execution state. Different input returns 409
 IDEMPOTENCY_CONFLICT without mutation. Null keys always create independent Jobs.
 CreateDisposition explicitly distinguishes creation and replay; times/IDs are not
@@ -90,7 +90,7 @@ has its own five-second budget; registry stop has three seconds. Compose grants
 requires an unexpired lease; expiry wins over late completion.
 
 DB startup must succeed within ten seconds. Readiness checks PostgreSQL, Redis
-and jobs/outbox/worker columns (including retry_at) within two seconds. CRUD and
+and jobs/outbox/worker columns (including retry_at/cancel_requested_at/submission_max_attempts) within two seconds. CRUD and
 Claim/Finalize are bounded to five seconds; recovery/promotion/offline operations
 are bounded to three seconds. Raw driver errors, panic values and payloads are
 never logged or returned. Redis failure retains durable intent; DB failure never
@@ -113,7 +113,45 @@ effect. External effects can repeat if execution happens before a failed DB comm
 Leases fence DB writes only; future executors need business-specific dedup/fencing.
 
 Local development only: no authentication, tenant isolation, Redis TLS, admission
-control, generic timeout enforcement, user cancellation, priority scheduling,
-DLQ management, metrics/tracing, benchmarks or deployment automation. Stream,
+control, priority aging, scheduled/capability-aware work, persistent per-job logs,
+DLQ UI, metrics/tracing, benchmarks or deployment automation. Stream,
 consumer, outbox and key retention are unbounded. SLEEP remains the only production
-executor. See ADRs 0003–0006, lifecycle, worker operations and independent reports.
+executor. See ADRs 0003–0007, lifecycle, worker operations and independent reports.
+
+## Phase 6 scheduling and control
+
+PendingDispatch ranks priority DESC / created_at ASC / id ASC. Claim uses a short
+transaction-scoped advisory lock and rechecks ordered eligibility in PostgreSQL;
+Redis backlog cannot grant lower-ranked work authority. No lock spans execution.
+Same-priority tie ordering is deterministic at Claim snapshots. Running work is
+non-preemptive. Deferred notification retries at most three 250ms waits then ACKs;
+QUEUED durable reconciliation provides subsequent notification at 30s. Aging and
+strict global FIFO are not provided. Short scheduling serialization trades peak
+Claim throughput for an explainable authority boundary.
+
+Each executor context has Job.timeout seconds from invocation; queue/retry time
+is excluded. TIMED_OUT Attempt settles via RUNNING -> TIMED_OUT -> RETRYING or
+DEAD_LETTER, with execution_timeout and unchanged retry policy/budget. Context-aware
+SLEEP and renewers stop/join at deadline. Uncooperative executors are unsupported;
+there is no mechanism to forcibly stop arbitrary external side effects.
+
+ControlRepository owns Cancel/Redrive/ListDeadLetter/Attempts operations separately
+from the ordinary transition graph. Cancel QUEUED/RETRYING locks and terminates
+without extra Attempt and removes intent. RUNNING records durable user intent;
+Renew returns a distinguished cancellation signal. Fenced Finalize locks that row
+and honors cancellation before any success/timeout. Recovery honors the same intent
+at expired lease, including crash before cooperative settlement. SKIP LOCKED can
+require the next maintenance scan. User cancellation never schedules retry.
+
+Manual redrive is an explicit graph exception: DEAD_LETTER remains terminal for
+ordinary transitions. It locks, grants +1 max_attempts (<=100), clears terminal
+metadata and resets intent in one transaction. Count/history are retained; next
+Claim allocates the next sequence. Two redrives cannot both grant budget. Original
+submission_max_attempts is persisted separately, preserving Phase 5 key identity.
+
+000006 appends cancel_requested_at, original submission budget, state consistency
+and partial priority/DLQ indexes. DLQ pagination deliberately uses existing
+creation-time cursors, not a new completion-time encoding; Attempts history is
+bounded by the global 100-attempt budget. Error codes are sanitized; there is no
+persistent application-log subsystem, DLQ UI or authorization layer. Operator
+resolution of retained legacy duplicate keys remains required before 000005+.

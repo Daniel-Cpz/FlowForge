@@ -25,3 +25,4 @@ Which simpler or different approaches were considered?
 ```
 
 - [0006 — Budgeted retries and submission idempotency](0006-budgeted-retries-and-submission-idempotency.md)
+- [0007 — Priority, attempt deadlines, cancellation and DLQ](0007-priority-timeout-cancellation-dlq.md)

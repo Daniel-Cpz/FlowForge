@@ -91,6 +91,20 @@ func (w *Worker) handle(ctx, cleanup context.Context, msg *job.Delivery, logger 
 		return false, w.queue.Ack(ctx, msg.MessageID)
 	}
 	j, err = w.store.Claim(ctx, id, w.id)
+	// Give concurrent higher-ranked claims a short bounded opportunity to
+	// commit before deferring this delivery to normal reconciliation.
+	for n := 0; n < 3 && errors.Is(err, job.ErrPriorityDeferred); n++ {
+		if !wait(ctx) {
+			return false, ctx.Err()
+		}
+		j, err = w.store.Claim(ctx, id, w.id)
+	}
+	if errors.Is(err, job.ErrPriorityDeferred) {
+		logger.Info("Delivery deferred by priority", "event", "priority_deferred", "job_id", id)
+		// ACK only the notification; QUEUED intent remains and is reconciled at
+		// the existing bounded 30s cadence, without a tight redispatch loop.
+		return false, w.queue.Ack(ctx, msg.MessageID)
+	}
 	if errors.Is(err, job.ErrInvalidTransition) {
 		return false, w.queue.Ack(ctx, msg.MessageID)
 	}
@@ -116,7 +130,7 @@ func (w *Worker) handle(ctx, cleanup context.Context, msg *job.Delivery, logger 
 	finishCtx, cancel := context.WithTimeout(cleanup, 5*time.Second)
 	defer cancel()
 	var failure []job.Failure
-	if out.Status == job.Failed {
+	if out.Status == job.Failed || out.Status == job.TimedOut {
 		failure = append(failure, out.Failure)
 	}
 	if err := w.store.Finalize(finishCtx, j, out.Status, out.Result, failure...); err != nil {

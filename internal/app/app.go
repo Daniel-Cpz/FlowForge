@@ -59,7 +59,7 @@ func Run(ctx context.Context, process string) error {
 		func(ctx context.Context) error {
 			// Readiness includes the schema used by this API, not just a TCP connection.
 			_, err := pool.Exec(ctx, `SELECT id, type, status, priority, payload, result, attempt_count, max_attempts, timeout,
-			 idempotency_key, assigned_worker, lease_expiry, retry_at, created_at, started_at, finished_at FROM jobs LIMIT 0`)
+			 idempotency_key, assigned_worker, lease_expiry, retry_at, cancel_requested_at, submission_max_attempts, created_at, started_at, finished_at FROM jobs LIMIT 0`)
 			if err == nil {
 				_, err = pool.Exec(ctx, `SELECT job_id,created_at,published_at FROM job_dispatch LIMIT 0`)
 			}

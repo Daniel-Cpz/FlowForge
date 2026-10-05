@@ -15,7 +15,11 @@ func NewRouter(service *service.Service, logger *slog.Logger, checks ...handler.
 	mux.HandleFunc("POST /api/v1/jobs", jobs.Create)
 	mux.HandleFunc("GET /api/v1/jobs", jobs.List)
 	mux.HandleFunc("GET /api/v1/jobs/{id}", jobs.Get)
-	for path, allow := range map[string]string{"/health": "GET, HEAD", "/ready": "GET, HEAD", "/api/v1/jobs": "GET, HEAD, POST", "/api/v1/jobs/{id}": "GET, HEAD"} {
+	mux.HandleFunc("GET /api/v1/dead-letter", jobs.DeadLetter)
+	mux.HandleFunc("GET /api/v1/jobs/{id}/attempts", jobs.Attempts)
+	mux.HandleFunc("POST /api/v1/jobs/{id}/cancel", jobs.Cancel)
+	mux.HandleFunc("POST /api/v1/jobs/{id}/retry", jobs.Redrive)
+	for path, allow := range map[string]string{"/health": "GET, HEAD", "/ready": "GET, HEAD", "/api/v1/jobs": "GET, HEAD, POST", "/api/v1/jobs/{id}": "GET, HEAD", "/api/v1/dead-letter": "GET, HEAD", "/api/v1/jobs/{id}/attempts": "GET, HEAD", "/api/v1/jobs/{id}/cancel": "POST", "/api/v1/jobs/{id}/retry": "POST"} {
 		mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) { handler.RoutingError(w, r, true, allow) })
 	}
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { handler.RoutingError(w, r, false, "") })

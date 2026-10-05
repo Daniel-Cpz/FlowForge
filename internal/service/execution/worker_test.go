@@ -64,7 +64,7 @@ func TestWorkerBoundaries(t *testing.T) {
 	for _, mode := range []string{"success", "terminal", "running", "missing", "malformed", "version", "claim_rejected", "get_error", "claim_error", "finish_error", "ack_error", "shutdown"} {
 		t.Run(mode, func(t *testing.T) {
 			id := uuid.New()
-			s := &fakeStore{j: &job.Job{ID: id, Status: job.Queued}}
+			s := &fakeStore{j: &job.Job{ID: id, Status: job.Queued, Timeout: 300}}
 			q := &fakeQueue{}
 			e := &fakeExecutor{}
 			msg := &job.Delivery{MessageID: "1-0", Version: "1", JobID: id.String()}
@@ -132,7 +132,7 @@ func TestWorkerRunBoundedFailureAndIdleCancellation(t *testing.T) {
 
 func TestWorkerRunStopsAfterFinalizeFailure(t *testing.T) {
 	id := uuid.New()
-	s := &fakeStore{j: &job.Job{ID: id, Status: job.Queued}, finishErr: errors.New("raw driver secret")}
+	s := &fakeStore{j: &job.Job{ID: id, Status: job.Queued, Timeout: 300}, finishErr: errors.New("raw driver secret")}
 	q := &fakeQueue{msg: &job.Delivery{MessageID: "1-0", JobID: id.String(), Version: "1"}}
 	e := &fakeExecutor{}
 	err := New(s, q, e, slog.New(slog.NewTextHandler(io.Discard, nil))).Run(t.Context())

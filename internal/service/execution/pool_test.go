@@ -157,7 +157,7 @@ func poolFixture(count int) (*poolStore, *poolQueue, *barrierExecutor) {
 	e := &barrierExecutor{entered: make(chan uuid.UUID, count), release: make(chan struct{}, count)}
 	for n := 0; n < count; n++ {
 		id := uuid.New()
-		s.jobs[id] = &job.Job{ID: id, Status: job.Queued}
+		s.jobs[id] = &job.Job{ID: id, Status: job.Queued, Timeout: 300}
 		q.messages <- &job.Delivery{MessageID: fmt.Sprint(n), JobID: id.String(), Version: "1"}
 	}
 	return s, q, e
