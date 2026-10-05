@@ -42,6 +42,8 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 
 func (h *Jobs) fail(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
+	case errors.Is(err, domain.ErrIdempotencyConflict):
+		writeError(w, 409, "IDEMPOTENCY_CONFLICT", "idempotency key belongs to a different request")
 	case errors.Is(err, domain.ErrInvalidInput):
 		writeError(w, 400, "INVALID_INPUT", "invalid job input")
 	case errors.Is(err, domain.ErrNotFound):
@@ -67,13 +69,17 @@ func (h *Jobs) Create(w http.ResponseWriter, r *http.Request) {
 		h.decodeError(w, err)
 		return
 	}
-	j, err := h.service.Create(r.Context(), in)
+	j, disposition, err := h.service.CreateWithDisposition(r.Context(), in)
 	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
 	w.Header().Set("Location", "/api/v1/jobs/"+j.ID.String())
-	writeJSON(w, 201, j)
+	status := http.StatusCreated
+	if disposition == domain.Replayed {
+		status = http.StatusOK
+	}
+	writeJSON(w, status, j)
 }
 
 func (h *Jobs) decodeError(w http.ResponseWriter, err error) {

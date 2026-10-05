@@ -1,8 +1,8 @@
 # Development roadmap
 
-Phases 0–4 are implemented: foundation, strict API/persistence, durable dispatch,
-SLEEP execution, multiple workers with bounded concurrency, and DB-time lease recovery.
-Phase 5 onward remains Planned. Authoritative completion status is in
+Phases 0–5 are implemented: foundation, strict API/persistence, durable dispatch,
+SLEEP execution, multiple workers with bounded concurrency, DB-time lease recovery, budgeted retry/backoff/jitter and submission idempotency.
+Phase 6 onward remains Planned. Authoritative completion status is in
 [`automation/state.json`](../automation/state.json). The whole-project
 [`README.md`](../README.md) and each independent report are required on completion.
 See the [protocol](phase-automation.md) and [report template](phase-report-template.md).
@@ -21,20 +21,13 @@ See the [protocol](phase-automation.md) and [report template](phase-report-templ
 | 9 | Prometheus + Grafana + tracing + failure injection + benchmarks |
 | 10 | Cloud deployment + CI/CD |
 
-## Next recommendation: Phase 5 — Retry + Idempotency
+## Current completion and next handoff
 
-Phase 3 preserves PostgreSQL conditional claim/attempt and owner/attempt finalization,
-adds C fixed slots per process, shared stream/group process identities, multiple
-bounded dispatchers, fail-fast supervision and concurrent shutdown. Barrier/race
-and isolated PostgreSQL/Redis tests plus two real processes validate correctness;
-no scaling throughput claim is made.
+Phase 5 unifies execution attempt budgets, durable RETRYING schedules, concurrent
+promotion, bounded equal jitter, failure classification and global submission
+idempotency. Permanent/exhausted failures end DEAD_LETTER. It does not implement
+priority, generic timeout enforcement, user cancellation or DLQ management.
 
-Phase 4 adds persisted heartbeat/offline state, valid-lease Claim/Renew/Finalize,
-bounded concurrent reapers and atomic recovery/dispatch intent. SIGKILL and paused
-stale-owner smoke demonstrates takeover with independent Attempt history.
-
-Phase 5 should define business retryability, bounded backoff/jitter, unified
-max_attempts accounting and submission idempotency. Crash attempts currently may
-exceed max_attempts to avoid stranding recoverable RUNNING work; business FAILED
-jobs are not retried. This is a recommendation only; Codex has not generated or
-started Phase 5. External review and prompt publication are required for handoff.
+External Automation must review the Phase 5 report and publish a legitimate next
+prompt. Phase 6 is the existing roadmap recommendation only; Codex has not
+created a Phase 6 prompt, advanced its processed counter or started that scope.

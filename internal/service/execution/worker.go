@@ -18,7 +18,7 @@ import (
 type Store interface {
 	GetByID(context.Context, uuid.UUID) (*job.Job, error)
 	Claim(context.Context, uuid.UUID, uuid.UUID) (*job.Job, error)
-	Finalize(context.Context, *job.Job, job.Status, json.RawMessage) error
+	Finalize(context.Context, *job.Job, job.Status, json.RawMessage, ...job.Failure) error
 }
 type Queue interface {
 	Receive(context.Context, string) (*job.Delivery, error)
@@ -115,13 +115,17 @@ func (w *Worker) handle(ctx, cleanup context.Context, msg *job.Delivery, logger 
 	// cleanup is canceled at the single process deadline five seconds after drain.
 	finishCtx, cancel := context.WithTimeout(cleanup, 5*time.Second)
 	defer cancel()
-	if err := w.store.Finalize(finishCtx, j, out.Status, out.Result); err != nil {
+	var failure []job.Failure
+	if out.Status == job.Failed {
+		failure = append(failure, out.Failure)
+	}
+	if err := w.store.Finalize(finishCtx, j, out.Status, out.Result, failure...); err != nil {
 		if errors.Is(err, job.ErrLeaseLost) {
 			logger.Warn("Stale execution rejected", "event", "stale_finalize_rejected")
 		}
 		return true, err
 	}
-	logger.Info("Job execution persisted", "event", "job_finished", "status", out.Status, "active_jobs", w.active.Load())
+	logger.Info("Job execution persisted", "event", "job_finished", "status", j.Status, "retry_at", j.RetryAt, "failure_class", out.Failure.Class, "active_jobs", w.active.Load())
 	return true, w.queue.Ack(finishCtx, msg.MessageID)
 }
 

@@ -49,7 +49,7 @@ func (s *poolStore) Claim(_ context.Context, id, worker uuid.UUID) (*job.Job, er
 	copy := *j
 	return &copy, nil
 }
-func (s *poolStore) Finalize(ctx context.Context, j *job.Job, status job.Status, result json.RawMessage) error {
+func (s *poolStore) Finalize(ctx context.Context, j *job.Job, status job.Status, result json.RawMessage, failures ...job.Failure) error {
 	if s.finishStarted != nil {
 		select {
 		case s.finishStarted <- j.ID:
@@ -139,16 +139,16 @@ func (e *barrierExecutor) Execute(ctx context.Context, j *job.Job) Outcome {
 	select {
 	case e.entered <- j.ID:
 	case <-ctx.Done():
-		return Outcome{job.Failed, json.RawMessage(`{"error":"execution_cancelled"}`)}
+		return failure("execution_cancelled")
 	}
 	if j.ID == e.panicJob {
 		panic("payload secret")
 	}
 	select {
 	case <-e.release:
-		return Outcome{job.Succeeded, json.RawMessage(`{}`)}
+		return Outcome{Status: job.Succeeded, Result: json.RawMessage(`{}`)}
 	case <-ctx.Done():
-		return Outcome{job.Failed, json.RawMessage(`{"error":"execution_cancelled"}`)}
+		return failure("execution_cancelled")
 	}
 }
 func poolFixture(count int) (*poolStore, *poolQueue, *barrierExecutor) {

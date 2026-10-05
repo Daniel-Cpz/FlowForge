@@ -1,6 +1,6 @@
 # Job lifecycle
 
-Status: state validation, execution, leases and expiry recovery implemented.
+Status: execution, leases, budgeted retries and submission idempotency implemented.
 
 | From | Allowed targets |
 |---|---|
@@ -10,99 +10,87 @@ Status: state validation, execution, leases and expiry recovery implemented.
 | RETRYING | QUEUED |
 | SUCCEEDED, DEAD_LETTER, CANCELLED, TIMED_OUT | none |
 
-Unknown states, self-transitions and every edge absent from the table are
-rejected. `Job.Transition` returns `ErrInvalidTransition` and leaves the job
-unchanged. Tests cover the full cross product, including unknown/empty values.
-The method validates the state graph only; execution timestamps, attempts,
-ownership and durable compare-and-set transitions are coordinated by the
-repository. Phase 4 adds a separate expiry-guarded RecoverExpired operation for
-RUNNING -> QUEUED; this does not expand ordinary transitions or business retry.
-No HTTP state-change endpoint exists.
+Unknown/self/absent edges fail without changing the Job. The graph is centralized
+in domain; durable authority requires repository transactions and SQL fences.
+There is no HTTP state-change endpoint. Priority/timeout/user cancellation and
+DLQ management remain planned, despite reserved graph states.
 
-Creation initializes QUEUED, attempt_count 0 and UTC created_at. Payload and
-result use JSON; IDs are UUID; nullable metadata uses pointers or nil RawMessage.
-All PostgreSQL times are TIMESTAMPTZ and outbound times use UTC RFC3339 strings.
-Timeout is an integer number of seconds, reserved for a later execution policy.
+```mermaid
+stateDiagram-v2
+    [*] --> QUEUED
+    QUEUED --> RUNNING: atomic Claim + Attempt
+    RUNNING --> SUCCEEDED: fenced success + ACK after commit
+    RUNNING --> FAILED: fenced failure or expired lease
+    FAILED --> RETRYING: retryable and budget remains
+    FAILED --> DEAD_LETTER: permanent or budget exhausted
+    RETRYING --> QUEUED: due DB time + dispatch intent
+```
 
-## Job is not an attempt
+FAILED is an intermediate logical transition for Phase 5 failures; one transaction
+persists RETRYING or DEAD_LETTER, so observers need not see transient FAILED.
+Historical FAILED Jobs remain unchanged and are not automatically retried.
 
-A job is the durable logical request. An attempt is one execution of it by a
-worker. The attempt table reserves a unique `(job_id, attempt_number)` and
-records status, worker, start/end times, result and error. Its states are the
-execution subset RUNNING, SUCCEEDED, FAILED, TIMED_OUT and CANCELLED.
+## Job and Attempt
 
-Implemented crash example: attempt 1 on A expires, is closed FAILED/lease_expired,
-then attempt 2 on B succeeds. Business FAILED retry remains planned.
-Phase 2 inserts one RUNNING attempt during atomic claim and
-updates it with the Job's terminal status, finish time and result in one
-transaction. Duplicate rejection before claim creates no attempt. Failure codes
-are recorded in result JSON; expiry recovery additionally sets attempt.error
-to lease_expired. There is no business retry loop. Worker IDs have no foreign key
-so existing pre-registry Attempt history remains valid. Phase 3 keeps one UUID
-per process across all C slots; restart generates a new UUID. A slot/Redis
-consumer is not the durable worker registration. Phase 4 persists process liveness
-separately in workers; stale/OFFLINE identity cannot be reused.
+Creation starts QUEUED/count 0. Claim alone increments count and inserts a unique
+(job_id,attempt_number) Attempt. max_attempts is the total execution budget (1..100),
+including business failures, expired leases and operational interruptions.
+Duplicate delivery, failed claim, replay and retry promotion consume no budget.
+No N+1 Attempt is created after exhaustion. Sequence and old Attempts are retained.
 
-## Database constraints
+Attempt states record execution, not scheduling: RUNNING, SUCCEEDED, FAILED and
+reserved TIMED_OUT/CANCELLED. A failed Attempt records stable error/result/end time;
+the corresponding Job may be RETRYING or DEAD_LETTER. Success Job/Attempt share
+result and completion time. Historical attempts need not match current Job status.
 
-Job status membership is constrained; SQL itself does not enforce transitions.
-Priority is 0–100, max_attempts 1–100, timeout 1–86400, attempt_count nonnegative.
-Attempts require positive sequence numbers and an existing job. End times cannot
-precede known start times. The list index is `(created_at DESC, id DESC)`;
-attempt uniqueness also indexes lookups by job_id. Phase 4 adds partial indexes
-on RUNNING lease_expiry and non-OFFLINE last_heartbeat for bounded recovery scans.
+retry_at is a nullable TIMESTAMPTZ, UTC RFC3339 on HTTP. Only RETRYING has it;
+RETRYING has no assigned_worker/lease and must have remaining budget. Success and
+DEAD_LETTER clear retry_at/lease. DEAD_LETTER also clears current assigned_worker;
+its Attempt retains worker identity. QUEUED/RUNNING start with retry_at null.
 
-Migrations 000001 and 000002 define jobs and job_attempts respectively; matching
-down files drop them in reverse order. The runner maintains schema_migrations.
-Version 000003 adds job_dispatch and backfills existing QUEUED Jobs; down drops
-only that table. Historical SQL files are unchanged.
-Version 000004 adds workers/indexes and backfills null RUNNING leases to DB now;
-down drops only its registry/indexes. Job/Attempt history is preserved, but
-downgrade binaries cannot enforce lease semantics. Stop workers before rollback.
+## Failure, scheduling and ACK
 
-## Executed transitions and ACK boundaries
+Only SLEEP executes in production: exactly one duration_ms integer in 0..10000.
+Unsupported type/invalid SLEEP payload are permanent failures after one Attempt,
+ending DEAD_LETTER. execution_cancelled is a retryable process interruption,
+not user cancellation. lease_expired uses the identical retry budget/policy.
+Panic or ambiguous renewal leaves RUNNING for expiry recovery without guessing.
 
-QUEUED creation commits with durable dispatch intent. Claim atomically checks
-QUEUED, a fresh live registry identity and integer sequence capacity, assigns the
-process UUID, sets DB-time started_at/lease_expiry, increments attempt_count and
-inserts the matching attempt. Crash recovery can exceed stored max_attempts;
-Phase 5 will define combined retry accounting, and business FAILED is not retried.
-Finalization checks RUNNING + assigned_worker + attempt number + valid DB lease. Both repository
-operations use the domain graph; no SQL trigger duplicates transition policy.
+Equal jitter uses a bounded exponential cap, default base 1s/max 30s, actual delay
+in [cap/2,cap]. PostgreSQL time establishes schedule and due eligibility. Delay is
+never zero. RETRYING is durable across worker/process restart and Redis loss.
+Bounded concurrent promotion commits RETRYING -> QUEUED plus intent reset together;
+dispatch later publishes. No transaction crosses SLEEP, Redis or a waiting timer.
 
-SLEEP uses exactly one duration_ms integer, 0..10000 inclusive. It runs a
-context-aware timer. Invalid payload/unsupported type becomes FAILED after one
-claim with a static result error; normal completion becomes SUCCEEDED. General
-timeout, priority, retry and user-cancellation policies are still planned.
+Finalize requires RUNNING + matching owner/attempt + currently valid DB lease.
+Recovery requires an expired DB lease and locks exact old execution. Both close
+Attempt and settle Job atomically, using RUNNING -> FAILED -> target. Stale owner
+cannot renew or overwrite recovery. Missing/corrupt history rolls back the batch.
 
-Terminal persistence precedes XACK. Malformed, missing, RUNNING and terminal
-duplicates are ACKed without execution. Graceful process cancellation writes
-FAILED/execution_cancelled using bounded cleanup before ACK. A finalize failure
-rolls back both records, leaves RUNNING + pending, and stops the worker. A failed
-ACK after terminal commit leaves a terminal Job and possible pending message.
+ACK follows success, DEAD_LETTER or RETRYING commit. Failed settlement leaves
+RUNNING/pending and stops the process; failed ACK leaves the committed outcome
+intact. Malformed/missing/non-QUEUED deliveries ACK only themselves. Ambiguous
+commit is resolved from DB truth. Old pending messages are retained; no reclamation
+or retention management is added. Healthy worker/DB/Redis are required for progress.
 
-Phase 3 preserves these boundaries across processes. A fatal slot error stops
-all peers and the process dispatcher; business failures do not stop the pool.
-Graceful cleanup runs concurrently against a shared deadline. In-flight Receive
-and Claim can race with cancellation: unclaimed deliveries remain unresolved,
-and a successful late claim attempts FAILED persistence. Executor panic leaves
-the winning Job RUNNING/pending and safely stops the process.
+## Submission idempotency
 
-## Expiry recovery
+The exact non-null global key identifies canonical type, JSONB payload, priority,
+max_attempts and timeout. First submission returns 201; same request replay returns
+200 with original Job/Location at any state; different request returns 409
+IDEMPOTENCY_CONFLICT and changes nothing. Null/absent keys always create distinct
+Jobs. Replay creates no Attempt/intent and does not restart terminal work.
 
-An abrupt post-claim crash or failed renewal leaves RUNNING until DB lease expiry.
-Reapers conditionally lock expired records; one transaction closes the exact old
-Attempt with finished_at/result/error=lease_expired, sets Job QUEUED and clears
-owner/lease/start/finish/result, then restores job_dispatch.published_at=NULL.
-Attempt count stays intact; next Claim creates a higher sequence without
-overwriting history. Any failure, missing/corrupt Attempt or intent-write failure
-rolls back the batch. No database transaction crosses SLEEP or Redis.
+## Constraints and migrations
 
-The expired owner cannot renew even before recovery, or finalize after expiry.
-After takeover its attempt number/owner no longer match. Graceful shutdown
-before expiry records execution_cancelled; expiry races reject late Finalize
-and leave recovery evidence authoritative. Renew failure retains the delivery
-without guessing completion. Ambiguous commits require reading database truth.
-Old Redis pending messages are not reclaimed; requeue restores fresh delivery.
-Healthy reapers and reachable dependencies are required for progress. External
-side effects may overlap/repeat across leases: no exactly-once guarantee.
+Database constrains status membership, numeric bounds, attempt_count<=max_attempts,
+retry/status consistency and key uniqueness. It does not duplicate the transition
+graph in triggers. Domain and scan validation reject corrupt stored data.
+
+000001 jobs, 000002 Attempts, 000003 dispatch and 000004 worker leases remain
+immutable. 000005 appends retries/idempotency. Duplicate-key preflight fails
+atomically without deleting/merging Jobs. Legacy count>100 requires explicit review;
+over-budget <=100 counts freeze max_attempts at the actual count and exhausted
+QUEUED Jobs normalize administratively to DEAD_LETTER, preserving history.
+Legacy RETRYING gets a DB-time one-second schedule. Down removes new objects but
+never erases history or restarts normalized work. Stop workers before schema changes.

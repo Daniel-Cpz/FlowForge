@@ -114,8 +114,8 @@ func TestPersistenceAndMigrations(t *testing.T) {
 	if !reflect.DeepEqual(j, got) {
 		t.Fatalf("persistence mismatch\n%+v\n%+v", j, got)
 	}
-	if _, err = s.Create(ctx, service.CreateInput{Type: "example", Payload: json.RawMessage(`null`), IdempotencyKey: &key}); err != nil {
-		t.Fatal("idempotency must not be enforced", err)
+	if _, err = s.Create(ctx, service.CreateInput{Type: "example", Payload: json.RawMessage(`null`), IdempotencyKey: nil}); err != nil {
+		t.Fatal("no-key creation failed", err)
 	}
 	page, err := s.List(ctx, 20, nil)
 	if err != nil {

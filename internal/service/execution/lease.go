@@ -20,6 +20,7 @@ type LeaseStore interface {
 	Renew(context.Context, *job.Job) (time.Time, error)
 	DetectOffline(context.Context, int) ([]uuid.UUID, error)
 	RecoverExpired(context.Context, int) ([]job.RecoveredAttempt, error)
+	PromoteRetries(context.Context, int) ([]uuid.UUID, error)
 }
 
 func (w *Worker) ensureRegistered(ctx context.Context) error {
@@ -77,7 +78,18 @@ func (w *Worker) recovery(ctx context.Context) error {
 			for _, r := range recovered {
 				logger := w.logger.With("job_id", r.JobID, "expired_worker_id", r.WorkerID, "attempt_number", r.AttemptNumber)
 				logger.Warn("Execution lease expired", "event", "lease_expired")
-				logger.Info("Job and dispatch intent restored", "event", "recovery_requeued")
+				logger.Info("Expired attempt settled", "event", "recovery_settled", "status", r.Status, "retry_at", r.RetryAt)
+			}
+		}
+		promoted, err := w.leases.PromoteRetries(ctx, 100)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			w.logger.Warn("Retry promotion failed", "event", "retry_promotion_failed")
+		} else {
+			for _, id := range promoted {
+				w.logger.Info("Due retry queued", "event", "retry_queued", "job_id", id)
 			}
 		}
 		offline, err := w.leases.DetectOffline(ctx, 100)

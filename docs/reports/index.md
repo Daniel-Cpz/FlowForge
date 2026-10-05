@@ -17,3 +17,5 @@ never infer the phase from report ordering.
 Each numbered report contains that Phase's own evidence. Read state for its published
 completion/Git checkpoint; the infrastructure report is independent and cannot
 substitute for phase completion.
+
+- [Phase 5 — Budgeted retries and submission idempotency](phase-5-report.md)

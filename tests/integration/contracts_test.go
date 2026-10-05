@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -66,7 +67,7 @@ func TestRepositoryAllFieldsReadback(t *testing.T) {
 		Payload: json.RawMessage(`{"b":[1,true,null],"a":9007199254740993}`), Result: json.RawMessage(`{"success":true}`),
 		AttemptCount: 2, MaxAttempts: 5, Timeout: 86400, IdempotencyKey: &key, AssignedWorker: &workerID,
 		CreatedAt: created, StartedAt: &started, FinishedAt: &finished, LeaseExpiry: &lease}
-	if err := repo.Create(ctx, j); err != nil {
+	if _, err := repo.Create(ctx, j); err != nil {
 		t.Fatal(err)
 	}
 	got, err := repo.GetByID(ctx, j.ID)
@@ -89,9 +90,10 @@ func TestRepositoryAllFieldsReadback(t *testing.T) {
 func TestHTTPPersistenceContract(t *testing.T) {
 	pool := migratedDatabase(t)
 	h := api(pool)
-	for _, payload := range []string{`{"nested":{"ok":true}}`, `[1,true,null]`, `"hello"`, `9007199254740993`, `true`, `null`, `{"a":1,"a":2}`, `"\ud83d\ude00"`} {
+	for index, payload := range []string{`{"nested":{"ok":true}}`, `[1,true,null]`, `"hello"`, `9007199254740993`, `true`, `null`, `{"a":1,"a":2}`, `"\ud83d\ude00"`} {
 		t.Run(payload, func(t *testing.T) {
-			body := `{"type":"  example  ","payload":` + payload + `,"priority":100,"max_attempts":100,"timeout":86400,"idempotency_key":" shared key "}`
+			key := " shared key " + strconv.Itoa(index)
+			body := `{"type":"  example  ","payload":` + payload + `,"priority":100,"max_attempts":100,"timeout":86400,"idempotency_key":"` + key + `"}`
 			w := send(h, "POST", "/api/v1/jobs", body)
 			if w.Code != 201 || w.Header().Get("Content-Type") != "application/json" {
 				t.Fatal(w.Code, w.Body.String())
@@ -101,7 +103,7 @@ func TestHTTPPersistenceContract(t *testing.T) {
 				t.Fatal(err)
 			}
 			if j.ID == uuid.Nil || j.Type != "example" || j.Status != domain.Queued || j.AttemptCount != 0 ||
-				j.Priority != 100 || j.MaxAttempts != 100 || j.Timeout != 86400 || *j.IdempotencyKey != " shared key " ||
+				j.Priority != 100 || j.MaxAttempts != 100 || j.Timeout != 86400 || *j.IdempotencyKey != key ||
 				j.CreatedAt.IsZero() || j.CreatedAt.Location() != time.UTC || string(j.Result) != "null" || j.AssignedWorker != nil ||
 				j.LeaseExpiry != nil || j.StartedAt != nil || j.FinishedAt != nil || w.Header().Get("Location") != "/api/v1/jobs/"+j.ID.String() {
 				t.Fatal("creation invariants", w.Body.String())
@@ -112,19 +114,16 @@ func TestHTTPPersistenceContract(t *testing.T) {
 			}
 		})
 	}
-	// Metadata keys have no uniqueness or duplicate-suppression semantics.
+	// No-key submissions remain independent Jobs.
 	var first, second domain.Job
 	for _, destination := range []*domain.Job{&first, &second} {
-		w := send(h, "POST", "/api/v1/jobs", `{"type":"x","payload":null,"idempotency_key":"duplicate"}`)
-		if w.Code != 201 {
+		w := send(h, "POST", "/api/v1/jobs", `{"type":"x","payload":null}`)
+		if w.Code != 201 || json.Unmarshal(w.Body.Bytes(), destination) != nil {
 			t.Fatal(w.Code, w.Body.String())
 		}
-		if err := json.Unmarshal(w.Body.Bytes(), destination); err != nil {
-			t.Fatal(err)
-		}
 	}
-	if first.ID == second.ID || first.ID == uuid.Nil {
-		t.Fatal("duplicate submissions must still be independent jobs")
+	if first.ID == second.ID {
+		t.Fatal("no-key submissions deduplicated")
 	}
 	checkHTTPError(t, send(h, "GET", "/api/v1/jobs/"+uuid.NewString(), ""), 404, "JOB_NOT_FOUND")
 	checkHTTPError(t, send(h, "GET", "/api/v1/jobs/not-a-uuid", ""), 400, "INVALID_ID")
@@ -168,7 +167,7 @@ func TestKeysetPaginationConcurrentInsert(t *testing.T) {
 	}
 	for _, id := range ids {
 		j := &domain.Job{ID: id, Type: "x", Status: domain.Queued, Payload: json.RawMessage(`null`), MaxAttempts: 3, Timeout: 300, CreatedAt: timestamp}
-		if err := repo.Create(ctx, j); err != nil {
+		if _, err := repo.Create(ctx, j); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -192,7 +191,7 @@ func TestKeysetPaginationConcurrentInsert(t *testing.T) {
 	// Insert a newer row between requests, without sleeps or concurrent timing races.
 	newest := &domain.Job{ID: uuid.New(), Type: "new", Status: domain.Queued, Payload: json.RawMessage(`null`),
 		MaxAttempts: 3, Timeout: 300, CreatedAt: timestamp.Add(time.Second)}
-	if err := repo.Create(ctx, newest); err != nil {
+	if _, err := repo.Create(ctx, newest); err != nil {
 		t.Fatal(err)
 	}
 	second := getPage("/api/v1/jobs?limit=2&cursor=" + url.QueryEscape(*first.Next))
@@ -271,7 +270,7 @@ func TestRepositoryContextAndConstraints(t *testing.T) {
 		}
 		copy := *j
 		copy.ID = uuid.New()
-		if err := repo.Create(ctx, &copy); !errors.Is(err, want) {
+		if _, err := repo.Create(ctx, &copy); !errors.Is(err, want) {
 			t.Fatal("create context lost", err)
 		}
 		cancel()

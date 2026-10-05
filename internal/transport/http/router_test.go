@@ -24,12 +24,12 @@ type memoryRepo struct {
 	err  error
 }
 
-func (m *memoryRepo) Create(ctx context.Context, j *domain.Job) error {
+func (m *memoryRepo) Create(ctx context.Context, j *domain.Job) (domain.CreateDisposition, error) {
 	if m.err != nil {
-		return m.err
+		return "", m.err
 	}
 	m.jobs = append(m.jobs, *j)
-	return nil
+	return domain.Created, nil
 }
 func (m *memoryRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.Job, error) {
 	if m.err != nil {

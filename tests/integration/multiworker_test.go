@@ -130,7 +130,7 @@ func TestMultipleWorkerPoolsAndDispatchers(t *testing.T) {
 	// and saturation above rely on barriers rather than elapsed-time assertions.
 	for {
 		var terminal int
-		if err := pool.QueryRow(ctx, `SELECT count(*) FROM jobs WHERE status IN ('SUCCEEDED','FAILED')`).Scan(&terminal); err != nil {
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM jobs WHERE status IN ('SUCCEEDED','DEAD_LETTER')`).Scan(&terminal); err != nil {
 			t.Fatal(err)
 		}
 		pending, err := client.XPending(ctx, key, group).Result()
@@ -155,7 +155,7 @@ func TestMultipleWorkerPoolsAndDispatchers(t *testing.T) {
 		}
 	}
 	var attempts, succeeded, failed, inconsistent int
-	if err := pool.QueryRow(joinCtx, `SELECT (SELECT count(*) FROM job_attempts),(SELECT count(*) FROM jobs WHERE status='SUCCEEDED'),(SELECT count(*) FROM jobs WHERE status='FAILED'),(SELECT count(*) FROM jobs j JOIN job_attempts a ON a.job_id=j.id WHERE j.status<>a.status OR j.assigned_worker<>a.worker_id OR j.attempt_count<>a.attempt_number OR j.result IS DISTINCT FROM a.result OR j.finished_at IS DISTINCT FROM a.finished_at)`).Scan(&attempts, &succeeded, &failed, &inconsistent); err != nil {
+	if err := pool.QueryRow(joinCtx, `SELECT (SELECT count(*) FROM job_attempts),(SELECT count(*) FROM jobs WHERE status='SUCCEEDED'),(SELECT count(*) FROM jobs WHERE status='DEAD_LETTER'),(SELECT count(*) FROM jobs j JOIN job_attempts a ON a.job_id=j.id WHERE (j.status<>a.status AND NOT(j.status='DEAD_LETTER' AND a.status='FAILED')) OR (j.assigned_worker IS NOT NULL AND j.assigned_worker<>a.worker_id) OR j.attempt_count<>a.attempt_number OR j.result IS DISTINCT FROM a.result OR j.finished_at IS DISTINCT FROM a.finished_at)`).Scan(&attempts, &succeeded, &failed, &inconsistent); err != nil {
 		t.Fatal(err)
 	}
 	if attempts != 10 || succeeded != 8 || failed != 2 || inconsistent != 0 || e1.calls.Load()+e2.calls.Load() != 10 {

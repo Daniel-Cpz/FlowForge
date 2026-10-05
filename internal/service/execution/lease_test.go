@@ -177,3 +177,7 @@ func TestLeaseLoopsRenewalFailureGracefulAndPanicJoin(t *testing.T) {
 		})
 	}
 }
+
+func (s *lifecycleStore) PromoteRetries(ctx context.Context, limit int) ([]uuid.UUID, error) {
+	return nil, ctx.Err()
+}

@@ -19,9 +19,9 @@ type repositoryStub struct {
 	err     error
 }
 
-func (r *repositoryStub) Create(ctx context.Context, j *domain.Job) error {
+func (r *repositoryStub) Create(ctx context.Context, j *domain.Job) (domain.CreateDisposition, error) {
 	r.created = j
-	return r.err
+	return domain.Created, r.err
 }
 func (r *repositoryStub) GetByID(ctx context.Context, id uuid.UUID) (*domain.Job, error) {
 	return nil, r.err

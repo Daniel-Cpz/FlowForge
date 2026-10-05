@@ -192,9 +192,9 @@ func TestListContract(t *testing.T) {
 
 type contextRepo struct{ seen context.Context }
 
-func (r *contextRepo) Create(ctx context.Context, j *domain.Job) error {
+func (r *contextRepo) Create(ctx context.Context, j *domain.Job) (domain.CreateDisposition, error) {
 	r.seen = ctx
-	return ctx.Err()
+	return domain.Created, ctx.Err()
 }
 func (r *contextRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.Job, error) {
 	r.seen = ctx

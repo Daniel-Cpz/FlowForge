@@ -8,6 +8,7 @@ import (
 
 	"github.com/Daniel-Cpz/FlowForge/internal/domain/job"
 	"github.com/Daniel-Cpz/FlowForge/internal/domain/worker"
+	"github.com/Daniel-Cpz/FlowForge/internal/retry"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -16,56 +17,85 @@ import (
 type JobRepository struct {
 	pool        *pgxpool.Pool
 	leasePolicy worker.LeasePolicy
+	retryPolicy retry.Policy
+	jitter      retry.Jitter
 }
 
 var _ job.Repository = (*JobRepository)(nil)
 
 func NewJobRepository(pool *pgxpool.Pool) *JobRepository {
-	return &JobRepository{pool: pool, leasePolicy: worker.DefaultLeasePolicy()}
+	return &JobRepository{pool: pool, leasePolicy: worker.DefaultLeasePolicy(), retryPolicy: retry.DefaultPolicy()}
 }
 
 func NewJobRepositoryWithPolicy(pool *pgxpool.Pool, policy worker.LeasePolicy) (*JobRepository, error) {
 	if err := policy.Validate(); err != nil {
 		return nil, err
 	}
-	return &JobRepository{pool: pool, leasePolicy: policy}, nil
+	return NewJobRepositoryWithPolicies(pool, policy, retry.DefaultPolicy(), nil)
+}
+
+func NewJobRepositoryWithPolicies(pool *pgxpool.Pool, lease worker.LeasePolicy, backoff retry.Policy, jitter retry.Jitter) (*JobRepository, error) {
+	if err := lease.Validate(); err != nil {
+		return nil, err
+	}
+	if err := backoff.Validate(); err != nil {
+		return nil, err
+	}
+	return &JobRepository{pool: pool, leasePolicy: lease, retryPolicy: backoff, jitter: jitter}, nil
 }
 
 const columns = `id, type, status, priority, payload, result, attempt_count, max_attempts,
- timeout, idempotency_key, assigned_worker, lease_expiry, created_at, started_at, finished_at`
+ timeout, idempotency_key, assigned_worker, lease_expiry, created_at, started_at, finished_at, retry_at`
 
-func (r *JobRepository) Create(ctx context.Context, j *job.Job) error {
+func (r *JobRepository) Create(ctx context.Context, j *job.Job) (job.CreateDisposition, error) {
 	if err := j.Validate(); err != nil {
-		return err
+		return "", err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("begin create: %w", err)
+		return "", fmt.Errorf("begin create: %w", err)
 	}
 	defer rollback(tx)
 	stored, err := scanJob(tx.QueryRow(ctx, `INSERT INTO jobs (`+columns+`) VALUES
-	 ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING `+columns,
+	 ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+ ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING RETURNING `+columns,
 		j.ID, j.Type, j.Status, j.Priority, j.Payload, j.Result, j.AttemptCount, j.MaxAttempts,
-		j.Timeout, j.IdempotencyKey, j.AssignedWorker, j.LeaseExpiry, j.CreatedAt, j.StartedAt, j.FinishedAt))
+		j.Timeout, j.IdempotencyKey, j.AssignedWorker, j.LeaseExpiry, j.CreatedAt, j.StartedAt, j.FinishedAt, j.RetryAt))
+	disposition := job.Created
+	if errors.Is(err, job.ErrNotFound) && j.IdempotencyKey != nil {
+		// A new READ COMMITTED statement sees the committed winning insert after
+		// uniqueness arbitration. Compare JSONB inside PostgreSQL, not float64 JSON.
+		stored, err = scanJob(tx.QueryRow(ctx, `SELECT `+columns+` FROM jobs WHERE idempotency_key=$1 FOR SHARE`, *j.IdempotencyKey))
+		if err == nil {
+			var same bool
+			err = tx.QueryRow(ctx, `SELECT type=$2 AND payload=$3::jsonb AND priority=$4 AND max_attempts=$5 AND timeout=$6 FROM jobs WHERE id=$1`, stored.ID, j.Type, j.Payload, j.Priority, j.MaxAttempts, j.Timeout).Scan(&same)
+			if err == nil && !same {
+				return "", job.ErrIdempotencyConflict
+			}
+		}
+		disposition = job.Replayed
+	}
 	if err != nil {
 		// JSONB rejects Unicode NUL, unpaired surrogates and numeric overflow.
 		// All non-JSON values have already passed domain bounds validation.
 		var pgErr interface{ SQLState() string }
 		if errors.As(err, &pgErr) && (pgErr.SQLState() == "22P02" || pgErr.SQLState() == "22P05" || pgErr.SQLState() == "22003") {
-			return job.ErrInvalidInput
+			return "", job.ErrInvalidInput
 		}
-		return fmt.Errorf("create job: %w", err)
+		return "", fmt.Errorf("create job: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO job_dispatch(job_id) VALUES($1)`, j.ID); err != nil {
-		return fmt.Errorf("create dispatch intent: %w", err)
+	if disposition == job.Created {
+		if _, err := tx.Exec(ctx, `INSERT INTO job_dispatch(job_id) VALUES($1)`, j.ID); err != nil {
+			return "", fmt.Errorf("create dispatch intent: %w", err)
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit create: %w", err)
+		return "", fmt.Errorf("commit create: %w", err)
 	}
 	*j = *stored
-	return nil
+	return disposition, nil
 }
 
 func rollback(tx pgx.Tx) {
@@ -77,7 +107,7 @@ func rollback(tx pgx.Tx) {
 func scanJob(row pgx.Row) (*job.Job, error) {
 	var j job.Job
 	err := row.Scan(&j.ID, &j.Type, &j.Status, &j.Priority, &j.Payload, &j.Result, &j.AttemptCount,
-		&j.MaxAttempts, &j.Timeout, &j.IdempotencyKey, &j.AssignedWorker, &j.LeaseExpiry, &j.CreatedAt, &j.StartedAt, &j.FinishedAt)
+		&j.MaxAttempts, &j.Timeout, &j.IdempotencyKey, &j.AssignedWorker, &j.LeaseExpiry, &j.CreatedAt, &j.StartedAt, &j.FinishedAt, &j.RetryAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, job.ErrNotFound
 	}
@@ -85,7 +115,7 @@ func scanJob(row pgx.Row) (*job.Job, error) {
 		return nil, fmt.Errorf("scan job: %w", err)
 	}
 	j.CreatedAt = j.CreatedAt.UTC()
-	for _, t := range []*time.Time{j.LeaseExpiry, j.StartedAt, j.FinishedAt} {
+	for _, t := range []*time.Time{j.LeaseExpiry, j.RetryAt, j.StartedAt, j.FinishedAt} {
 		if t != nil {
 			*t = t.UTC()
 		}

@@ -10,7 +10,7 @@ func TestLeaseOwnershipAndExpiryRecovery(t *testing.T) {
 	now := time.Date(2026, 10, 5, 4, 0, 0, 0, time.UTC)
 	owner := uuid.New()
 	expiry := now.Add(time.Second)
-	original := Job{ID: uuid.New(), Status: Running, AssignedWorker: &owner, AttemptCount: 2, LeaseExpiry: &expiry}
+	original := Job{ID: uuid.New(), Status: Running, AssignedWorker: &owner, AttemptCount: 2, MaxAttempts: 3, LeaseExpiry: &expiry}
 	if !original.OwnsLease(owner, 2, now) || original.OwnsLease(uuid.New(), 2, now) || original.OwnsLease(owner, 1, now) || original.OwnsLease(owner, 2, expiry) {
 		t.Fatal("invalid lease authority")
 	}
@@ -48,7 +48,7 @@ func TestLeaseOwnershipAndExpiryRecovery(t *testing.T) {
 	if err := j.RecoverExpired(expiry); err != nil {
 		t.Fatal(err)
 	}
-	if j.Status != Queued || j.AttemptCount != 2 || j.AssignedWorker != nil || j.LeaseExpiry != nil || j.StartedAt != nil || j.Result != nil {
+	if j.Status != Retrying || j.AttemptCount != 2 || j.AssignedWorker != nil || j.LeaseExpiry != nil || j.RetryAt == nil {
 		t.Fatal("recovery lost history or retained execution metadata")
 	}
 	if j.RecoverExpired(expiry) == nil {

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"github.com/Daniel-Cpz/FlowForge/internal/domain/worker"
+	"github.com/Daniel-Cpz/FlowForge/internal/retry"
 	"log/slog"
 	"net"
 	"net/url"
@@ -23,6 +24,7 @@ type Config struct {
 	LogLevel          slog.Level
 	WorkerConcurrency int
 	LeasePolicy       worker.LeasePolicy
+	RetryPolicy       retry.Policy
 }
 
 func value(key, fallback string) string {
@@ -43,6 +45,7 @@ func Load() (Config, error) {
 		return c, fmt.Errorf("FLOWFORGE_WORKER_CONCURRENCY must be an integer in 1..32")
 	}
 	c.LeasePolicy = worker.DefaultLeasePolicy()
+	c.RetryPolicy = retry.DefaultPolicy()
 	for _, setting := range []struct {
 		key    string
 		target *time.Duration
@@ -52,6 +55,8 @@ func Load() (Config, error) {
 		{"FLOWFORGE_HEARTBEAT_SECONDS", &c.LeasePolicy.HeartbeatInterval},
 		{"FLOWFORGE_OFFLINE_SECONDS", &c.LeasePolicy.OfflineAfter},
 		{"FLOWFORGE_RECOVERY_SECONDS", &c.LeasePolicy.RecoveryInterval},
+		{"FLOWFORGE_RETRY_BASE_SECONDS", &c.RetryPolicy.BaseDelay},
+		{"FLOWFORGE_RETRY_MAX_SECONDS", &c.RetryPolicy.MaxDelay},
 	} {
 		raw := value(setting.key, strconv.Itoa(int(*setting.target/time.Second)))
 		seconds, parseErr := strconv.Atoi(raw)
@@ -61,6 +66,9 @@ func Load() (Config, error) {
 		*setting.target = time.Duration(seconds) * time.Second
 	}
 	if err := c.LeasePolicy.Validate(); err != nil {
+		return c, err
+	}
+	if err := c.RetryPolicy.Validate(); err != nil {
 		return c, err
 	}
 	if strings.TrimSpace(c.RedisStream) == "" || len(c.RedisStream) > 256 || strings.IndexFunc(c.RedisStream, func(r rune) bool { return r < 32 || r == 127 }) >= 0 {

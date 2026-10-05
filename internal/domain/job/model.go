@@ -21,6 +21,7 @@ type Job struct {
 	IdempotencyKey *string         `json:"idempotency_key"`
 	AssignedWorker *uuid.UUID      `json:"assigned_worker"`
 	LeaseExpiry    *time.Time      `json:"lease_expiry"`
+	RetryAt        *time.Time      `json:"retry_at"`
 	CreatedAt      time.Time       `json:"created_at"`
 	StartedAt      *time.Time      `json:"started_at"`
 	FinishedAt     *time.Time      `json:"finished_at"`

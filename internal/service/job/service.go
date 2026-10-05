@@ -24,8 +24,13 @@ type CreateInput struct {
 }
 
 func (s *Service) Create(ctx context.Context, in CreateInput) (*domain.Job, error) {
+	j, _, err := s.CreateWithDisposition(ctx, in)
+	return j, err
+}
+
+func (s *Service) CreateWithDisposition(ctx context.Context, in CreateInput) (*domain.Job, domain.CreateDisposition, error) {
 	if len(in.Payload) > 1<<20 {
-		return nil, domain.ErrInvalidInput
+		return nil, "", domain.ErrInvalidInput
 	}
 	typ := strings.TrimSpace(in.Type)
 	maxAttempts, timeout := 3, 300
@@ -43,12 +48,13 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*domain.Job, erro
 		j.IdempotencyKey = &key
 	}
 	if err := j.Validate(); err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	if err := s.repo.Create(ctx, j); err != nil {
-		return nil, err
+	disposition, err := s.repo.Create(ctx, j)
+	if err != nil {
+		return nil, "", err
 	}
-	return j, nil
+	return j, disposition, nil
 }
 
 func (s *Service) GetByID(ctx context.Context, id uuid.UUID) (*domain.Job, error) {

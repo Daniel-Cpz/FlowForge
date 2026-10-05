@@ -10,8 +10,9 @@ import (
 )
 
 type Outcome struct {
-	Status job.Status
-	Result json.RawMessage
+	Status  job.Status
+	Result  json.RawMessage
+	Failure job.Failure
 }
 type Executor interface {
 	Execute(context.Context, *job.Job) Outcome
@@ -20,7 +21,11 @@ type Sleep struct{}
 
 func failure(code string) Outcome {
 	data, _ := json.Marshal(map[string]string{"error": code})
-	return Outcome{job.Failed, data}
+	class := job.Permanent
+	if code == "execution_cancelled" {
+		class = job.Retryable
+	}
+	return Outcome{Status: job.Failed, Result: data, Failure: job.Failure{Class: class, Code: code}}
 }
 
 // SLEEP accepts exactly one duration_ms integer field, 0..10000 inclusive.
@@ -56,5 +61,5 @@ func (Sleep) Execute(ctx context.Context, j *job.Job) Outcome {
 		return failure("execution_cancelled")
 	}
 	result, _ := json.Marshal(map[string]any{"outcome": "slept", "duration_ms": *duration})
-	return Outcome{job.Succeeded, result}
+	return Outcome{Status: job.Succeeded, Result: result}
 }

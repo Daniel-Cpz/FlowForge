@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -108,9 +109,8 @@ func (r *JobRepository) DetectOffline(ctx context.Context, limit int) ([]uuid.UU
 	return ids, rows.Err()
 }
 
-// Recovery and dispatch intent are one transaction. Row locks and conditional
-// owner/attempt/expiry predicates fence concurrent reapers and late execution.
-// A crash attempt ends FAILED/lease_expired; this is not business-failure retry.
+// Recovery closes expired Attempts through the same budget and backoff policy.
+// No Redis access or waiting occurs while row locks are held.
 func (r *JobRepository) RecoverExpired(ctx context.Context, limit int) ([]job.RecoveredAttempt, error) {
 	if limit < 1 || limit > 100 {
 		return nil, job.ErrInvalidInput
@@ -122,64 +122,89 @@ func (r *JobRepository) RecoverExpired(ctx context.Context, limit int) ([]job.Re
 		return nil, err
 	}
 	defer rollback(tx)
-	rows, err := tx.Query(ctx, `SELECT id,assigned_worker,attempt_count,lease_expiry,clock_timestamp() FROM jobs
- WHERE status='RUNNING' AND lease_expiry<=clock_timestamp() ORDER BY lease_expiry,id LIMIT $1 FOR UPDATE SKIP LOCKED`, limit)
+	rows, err := tx.Query(ctx, `SELECT `+columns+` FROM jobs WHERE status='RUNNING' AND lease_expiry<=clock_timestamp() ORDER BY lease_expiry,id LIMIT $1 FOR UPDATE SKIP LOCKED`, limit)
 	if err != nil {
 		return nil, err
 	}
-	type candidate struct {
-		id      uuid.UUID
-		owner   *uuid.UUID
-		attempt int
-		expiry  *time.Time
-		now     time.Time
-	}
-	candidates := make([]candidate, 0, limit)
+	candidates := make([]*job.Job, 0, limit)
 	for rows.Next() {
-		var c candidate
-		if err := rows.Scan(&c.id, &c.owner, &c.attempt, &c.expiry, &c.now); err != nil {
+		j, err := scanJob(rows)
+		if err != nil {
 			rows.Close()
 			return nil, err
 		}
-		candidates = append(candidates, c)
+		candidates = append(candidates, j)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	recovered := make([]job.RecoveredAttempt, 0, len(candidates))
-	for _, c := range candidates {
-		j := job.Job{ID: c.id, Status: job.Running, AssignedWorker: c.owner, AttemptCount: c.attempt, LeaseExpiry: c.expiry}
-		if err := j.RecoverExpired(c.now); err != nil {
+	for _, j := range candidates {
+		if j.AssignedWorker == nil || j.AttemptCount < 1 {
 			return nil, job.ErrInvalidStoredData
 		}
-		// Closing the exact old Attempt is mandatory. Corrupt history rolls back
-		// the entire bounded batch rather than silently inventing recovery evidence.
-		result, err := tx.Exec(ctx, `UPDATE job_attempts SET status='FAILED',error='lease_expired',
-   result='{"error":"lease_expired"}'::jsonb,finished_at=clock_timestamp()
-   WHERE job_id=$1 AND worker_id=$2 AND attempt_number=$3 AND status='RUNNING'`, c.id, *c.owner, c.attempt)
+		stored, err := r.finish(ctx, tx, j, job.Failed, json.RawMessage(`{"error":"lease_expired"}`), job.Failure{Class: job.Retryable, Code: "lease_expired"}, true)
 		if err != nil {
 			return nil, err
 		}
-		if result.RowsAffected() != 1 {
-			return nil, job.ErrInvalidStoredData
-		}
-		result, err = tx.Exec(ctx, `UPDATE jobs SET status='QUEUED',assigned_worker=NULL,lease_expiry=NULL,
-   started_at=NULL,finished_at=NULL,result=NULL WHERE id=$1 AND status='RUNNING' AND assigned_worker=$2
-   AND attempt_count=$3 AND lease_expiry=$4 AND lease_expiry<=clock_timestamp()`, c.id, *c.owner, c.attempt, c.expiry)
-		if err != nil {
-			return nil, err
-		}
-		if result.RowsAffected() != 1 {
-			return nil, job.ErrLeaseLost
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO job_dispatch(job_id) VALUES($1) ON CONFLICT(job_id) DO UPDATE SET published_at=NULL`, c.id); err != nil {
-			return nil, err
-		}
-		recovered = append(recovered, job.RecoveredAttempt{JobID: c.id, WorkerID: *c.owner, AttemptNumber: c.attempt})
+		recovered = append(recovered, job.RecoveredAttempt{JobID: j.ID, WorkerID: *j.AssignedWorker, AttemptNumber: j.AttemptCount, Status: stored.Status, RetryAt: stored.RetryAt})
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
 	return recovered, nil
+}
+
+// PromoteRetries atomically makes due retries dispatchable. Every process may
+// run this bounded scan; SKIP LOCKED prevents duplicate effective transitions.
+func (r *JobRepository) PromoteRetries(ctx context.Context, limit int) ([]uuid.UUID, error) {
+	if limit < 1 || limit > 100 {
+		return nil, job.ErrInvalidInput
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer rollback(tx)
+	rows, err := tx.Query(ctx, `SELECT `+columns+` FROM jobs WHERE status='RETRYING' AND retry_at<=clock_timestamp() AND attempt_count<max_attempts ORDER BY retry_at,id LIMIT $1 FOR UPDATE SKIP LOCKED`, limit)
+	if err != nil {
+		return nil, err
+	}
+	candidates := make([]*job.Job, 0, limit)
+	for rows.Next() {
+		j, err := scanJob(rows)
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		candidates = append(candidates, j)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	ids := make([]uuid.UUID, 0, len(candidates))
+	for _, j := range candidates {
+		if err := j.Transition(job.Queued); err != nil {
+			return nil, err
+		}
+		res, err := tx.Exec(ctx, `UPDATE jobs SET status='QUEUED',retry_at=NULL,started_at=NULL,finished_at=NULL,result=NULL WHERE id=$1 AND status='RETRYING' AND retry_at<=clock_timestamp() AND attempt_count<max_attempts`, j.ID)
+		if err != nil {
+			return nil, err
+		}
+		if res.RowsAffected() != 1 {
+			return nil, job.ErrInvalidTransition
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO job_dispatch(job_id) VALUES($1) ON CONFLICT(job_id) DO UPDATE SET published_at=NULL`, j.ID); err != nil {
+			return nil, err
+		}
+		ids = append(ids, j.ID)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return ids, nil
 }

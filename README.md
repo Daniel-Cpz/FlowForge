@@ -21,15 +21,15 @@ execution authority and crash recovery are guarded by PostgreSQL leases.
 ## Architecture
 
 ```text
-POST -> Job service -> PostgreSQL transaction: Job + dispatch intent
+POST -> Job service -> PostgreSQL: keyed create/replay/conflict + intent
                                |
                    Worker process dispatcher -> Redis Streams
                                |
                    N worker processes x C slots -> DB claim + attempt + lease
                                |
-                   SLEEP -> DB terminal Job + attempt -> Redis ACK
+                   SLEEP -> DB outcome + attempt + retry schedule/terminal -> Redis ACK
                                |
-                   Expired lease -> DB requeue + dispatch intent -> new attempt
+                   Expired lease -> budgeted RETRYING/DEAD_LETTER -> due queue + intent
 ```
 
 The composition root wires infrastructure into the service. Domain and service
@@ -90,7 +90,7 @@ commitment was found. `offset` now returns 400.
 |---|---|---|
 | GET | `/health` | Process alive, `200 {"status":"ok"}`; independent of dependencies |
 | GET | `/ready` | PostgreSQL, Redis and jobs/outbox/worker registry schema ready: 200; otherwise 503 |
-| POST | `/api/v1/jobs` | Create a QUEUED job; 201 with Location header |
+| POST | `/api/v1/jobs` | First create/no key 201; keyed replay 200; key conflict 409; Location identifies original Job |
 | GET | `/api/v1/jobs/{id}` | Job by UUID; 404 if absent, 400 if malformed |
 | GET | `/api/v1/jobs?limit=20&cursor=...` | Exclusive cursor pagination by `(created_at DESC, id DESC)` |
 
@@ -120,9 +120,9 @@ request envelope rejects duplicates; no recursive custom parser is introduced.
 
 `attempt_count` starts at 0. Unset result, worker, lease and execution timestamps
 serialize as null at creation. Time strings are RFC3339 with optional fractional seconds in
-UTC. A stored idempotency key does **not** suppress duplicate submissions.
+UTC. A non-null idempotency key is an exact global submission key: same canonical request returns the original Job (200), different request returns 409 `IDEMPOTENCY_CONFLICT`. Null/absent keys always create distinct Jobs. Canonical identity is trimmed type, JSONB-semantic payload, priority, max_attempts and timeout; generated ID/time are excluded. Replay works at RUNNING/RETRYING/terminal states and never redispatches.
 Timeout and priority are stored metadata and are not enforced during execution.
-POST returns the QUEUED representation captured in its Job/outbox transaction;
+First create returns the QUEUED representation captured in its Job/outbox transaction;
 a subsequent GET may already show execution progress. JSONB may normalize
 spacing, key order, numeric notation and nested duplicate keys. GET returns the
 same canonical payload representation.
@@ -134,7 +134,7 @@ same canonical payload representation.
 inclusive, with no extra fields. Fractions, exponent notation, wrong-case keys,
 null, strings and out-of-range values fail execution. The existing Create API
 still accepts arbitrary valid JSON and type strings; unsupported types and
-invalid SLEEP payloads receive 201 then become FAILED with a static result error
+invalid SLEEP payloads receive 201 then become DEAD_LETTER after a permanent failure with a static result error
 (`unsupported_job_type` or `invalid_sleep_payload`). JSONB's existing last-key
 semantics apply before execution. Success stores
 `{"duration_ms":250,"outcome":"slept"}`.
@@ -151,19 +151,30 @@ The dispatcher reads at most 100 intents each second; it also republishes
 still-QUEUED work after 30 seconds. PostgreSQL therefore reconstructs delivery
 after a lost Redis stream or a worker crash before claim. No full payload goes
 into Redis. The consumer group starts at `0`, receives one message at a time,
-and ACKs after terminal persistence (or after rejecting a missing, malformed,
+and ACKs after terminal or durable RETRYING persistence (or after rejecting a missing, malformed,
 RUNNING or non-QUEUED Job).
 
 An atomic `QUEUED -> RUNNING` claim commits an incremented attempt and lease.
 Concurrent duplicate claims create one current owner. Renew and Finalize require
 that owner, attempt number and a lease still valid at PostgreSQL time. Finalize
-commits Job + attempt together. No retry loop is added for business FAILED jobs.
-Idempotency keys still do not deduplicate submissions.
+commits Job + Attempt and durable outcome together. `max_attempts` now limits
+**total execution attempts**, including crashes and operational interruptions.
+Only Claim consumes budget; duplicate delivery/replay/promotion never does.
+Failures follow RUNNING -> FAILED -> RETRYING when retryable and budget remains,
+or RUNNING -> FAILED -> DEAD_LETTER when permanent/exhausted. Intermediate FAILED
+is applied in the transaction, not a required observable persisted state.
+
+RETRYING has `retry_at` and no execution owner/lease. Default equal jitter uses
+base=1s, max=30s: cap=min(max,base*2^(attempt-1)), actual delay uniform [cap/2,cap].
+Saturating arithmetic prevents overflow. Set FLOWFORGE_RETRY_BASE_SECONDS (1..60)
+and FLOWFORGE_RETRY_MAX_SECONDS (base..600). PostgreSQL clock determines schedule
+and due time. Bounded concurrent promotion commits RETRYING -> QUEUED and dispatch
+intent reset atomically; dispatcher publishes afterward. Schedule survives restart.
 
 Each process registers a fresh UUID and sends bounded heartbeats. Each active
 execution renews its lease; one reaper per process scans at most 100 expired
 RUNNING Jobs. Recovery closes the old Attempt as FAILED/`lease_expired`, returns
-the Job to QUEUED and resets durable dispatch intent in one transaction. Another
+the Job to budgeted RETRYING or DEAD_LETTER in one transaction. A due retry promoter resets dispatch intent; another
 worker creates a new attempt. Stale owners cannot renew or overwrite its result.
 All authority uses PostgreSQL time. Default lease/renew/heartbeat/offline/reaper
 periods are **15/5/2/10/1 seconds**, configurable within validated bounds in
@@ -172,26 +183,22 @@ periods are **15/5/2/10/1 seconds**, configurable within validated bounds in
 Heartbeat or renewal failure stops the pool; uncertain execution is left for
 lease recovery without false success/ACK. A finalize failure also stops the pool;
 the database determines whether a commit actually occurred. SIGINT/SIGTERM
-interrupts SLEEP and attempts bounded FAILED/`execution_cancelled` persistence
+interrupts SLEEP and attempts bounded retryable `execution_cancelled` settlement
 then ACK, provided its lease is still valid. Expiry wins over late graceful
 finalization. Recovery needs a healthy worker/reaper and reachable PostgreSQL;
 it is **at-least-once delivery**, with no exactly-once side-effect guarantee.
 Old Redis pending entries are retained; recovery publishes a fresh notification.
-Crash attempts may exceed stored `max_attempts`; Phase 5 will define unified
-retry accounting. No business retry, backoff or submission idempotency is implemented.
-See [worker operations](docs/worker-operations.md), [ADR 0003](docs/decisions/0003-durable-dispatch-and-single-worker.md)
-and [ADR 0004](docs/decisions/0004-fixed-worker-pool.md). Lease/recovery decisions
-are in [ADR 0005](docs/decisions/0005-db-time-leases-and-recovery.md).
+Crash/cancellation attempts respect the same max_attempts budget; N+1 cannot run.
+Submission idempotency != exactly-once execution != exactly-once business side
+effect. Lease fencing protects DB writes, not arbitrary external effects.
+See [worker operations](docs/worker-operations.md) and
+[ADR 0006](docs/decisions/0006-budgeted-retries-and-submission-idempotency.md).
 
-The tested two-process command is
-`docker compose up --build -d --scale worker=2 migrate api worker`.
-Set concurrency to 2 in `.env` to match the isolated acceptance smoke.
-Run `./scripts/phase3-smoke.ps1 -Concurrency 2` in PowerShell for that controlled
-smoke; it temporarily restarts development API/workers and restores one worker.
-`./scripts/phase4-smoke.ps1` validates independent-process SIGKILL takeover,
-paused stale-owner fencing and normal active SIGTERM with short test leases.
-It also disconnects one test worker from its Compose network to verify real
-heartbeat/renew failure and takeover, then restores that network connection.
+Run `./scripts/phase5-smoke.ps1` in PowerShell for isolated real API/idempotency
+and process-restart retry evidence. It builds a separate image and uses a generated
+DB/key/API port; existing development services/data remain intact. Phase 3/4 smoke
+scripts are historical fixtures for their tagged checkpoints, whose FAILED and
+immediate-requeue contracts Phase 5 supersedes.
 
 List accepts only `limit` (default 20, range 1–100) and optional `cursor`.
 Unknown/repeated query parameters, invalid limits and malformed query encoding
@@ -219,7 +226,7 @@ constructed cursor is accepted; clients must treat its encoding as opaque.
 
 Errors use `{"error":{"code":"JOB_NOT_FOUND","message":"job not found"}}`.
 Codes distinguish `INVALID_JSON`, `INVALID_INPUT`, `INVALID_ID`, `INVALID_CURSOR`,
-`BODY_TOO_LARGE`, `JOB_NOT_FOUND` and `INTERNAL_ERROR`. Dependency failures,
+`BODY_TOO_LARGE`, `JOB_NOT_FOUND`, `IDEMPOTENCY_CONFLICT` and `INTERNAL_ERROR`. Dependency failures,
 unexpected constraint failures and corrupt stored data return a generic 500;
 raw driver errors and secrets are not sent to clients. Readiness failures return
 a generic 503.
@@ -267,13 +274,23 @@ tests, set `FLOWFORGE_TEST_REDIS_ADDR` (and optional
 
 In Docker, migrations can also run with
 `docker compose run --rm migrate /app/migrate up` (or `down`). Stop API/worker
-before rolling back schema. Four `down` calls roll back workers, outbox, attempts and jobs.
+before rolling back schema. Five `down` calls remove retry schema, workers, outbox, attempts and jobs.
 Migration 000003 backfills dispatch intent for existing QUEUED Jobs. Starting the
 Phase 2 worker therefore processes existing queued work; unsupported legacy
-types become FAILED. Migration 000004 adds liveness and expiry indexes; pre-lease
+types become DEAD_LETTER under Phase 5. Migration 000004 adds liveness and expiry indexes; pre-lease
 RUNNING Jobs get an immediately expired lease. Recovery still requires consistent
 owned Attempt history, and stops on corrupt history. Do not roll back leases
 while workers run; historical binaries do not enforce the new authority rules.
+Migration 000005 adds retry schedule/budget constraints and global non-null key
+uniqueness. Legacy duplicate keys atomically block upgrade without deleting,
+merging or selecting a winner. Resolve them explicitly before upgrading; do not
+use automatic cleanup. Legacy count >100 also blocks migration; over-budget
+<=100 count freezes max_attempts at actual count, and exhausted QUEUED rows
+normalize to DEAD_LETTER with all Attempt history intact. Old RETRYING rows get
+a DB-time one-second schedule. Down removes new schema objects but never erases
+history/restarts normalized work. [Upgrade preflight](docs/worker-operations.md#upgrade-preflight)
+explains operator review and why mixed old/new processes are unsupported.
+
 Migrations use version tracking, an advisory transaction lock, and one atomic
 transaction per invocation. Applied SQL is immutable; use new versions for
 future changes. Changing passwords in `.env` does not change an existing
@@ -314,8 +331,14 @@ outbox history have no automatic retention/cleanup yet. All ports bind to loopba
 - Bounded context-aware SLEEP, deterministic failures and shutdown persistence
 - Real PostgreSQL/Redis E2E, duplicate/failure-window and isolated migration tests
 - Persisted worker liveness, bounded heartbeat/reaper/renew loops and joined shutdown
-- DB-time execution leases, stale-owner fencing and atomic recovery/dispatch intent
+- DB-time execution leases, stale-owner fencing and atomic expired-attempt settlement
 - Concurrent reaper, transaction rollback and independent-process crash recovery tests
+
+- Unified total Attempt budget, permanent/retryable failures and DEAD_LETTER exhaustion
+- Durable DB-time RETRYING schedules and bounded equal-jitter exponential backoff
+- Concurrent retry promotion with atomic dispatch-intent reconstruction
+- Global exact-key submission idempotency, explicit 201/200/409 HTTP semantics
+- Concurrent replay/conflict/migration tests and independent-process retry smoke
 
 ### Experimental
 
@@ -323,8 +346,7 @@ None. SLEEP crash recovery is tested; production hardening remains planned.
 
 ### Planned
 
-Scheduling, retry/backoff/jitter, submission idempotency,
-priority, timeout/user-cancellation execution policies, DLQ management,
+Scheduling, priority, timeout/user-cancellation execution policies, DLQ management,
 dashboard, metrics/tracing, failure injection, benchmarking and cloud deployment.
 
 ## Roadmap
@@ -333,13 +355,13 @@ Phase 1 delivers **Job Persistence + API Correctness**. Phase 2 implements
 **Redis Queue + Single Worker Execution** with a durable database outbox.
 Phase 3 implements **Multiple Workers + Bounded Concurrency**.
 Phase 4 implements **Heartbeat + Lease + Crash Recovery**.
-The next recommendation is **Phase 5 — Retry + Idempotency**; it remains Planned,
-and no next prompt has been generated by Codex.
+Phase 5 implements **Retry + Backoff + Jitter + Submission Idempotency**. Further phase scope requires external review and a prepared next prompt; Codex has not generated one.
 See the [Phase 0–10 roadmap](docs/development-roadmap.md) and authoritative phase state.
 The [Phase 1 report](docs/reports/phase-1-report.md) records its validation and Git checkpoint.
 The [Phase 2 report](docs/reports/phase-2-report.md) records execution/durability evidence.
 The [Phase 3 report](docs/reports/phase-3-report.md) records concurrency/process evidence.
 The [Phase 4 report](docs/reports/phase-4-report.md) records lease/fencing/recovery evidence.
+The [Phase 5 report](docs/reports/phase-5-report.md) records retry/idempotency/migration evidence.
 This repository does not claim exactly-once execution. Delivery is at-least-once;
 business side effects need their own idempotency safeguards.
 
@@ -365,7 +387,7 @@ phase report and real Git evidence pass their gates. The separate infrastructure
 report does not complete Phase 1.
 
 FlowForge supports both manual and automation-generated phase prompts. The
-current Phase 4 prompt is `automation`, at `automation/prompts/phase-4.md`.
+current Phase 5 prompt is `automation`, at `automation/prompts/phase-5.md`.
 Phase 1 used manual input, with no prompt file required.
 Automated prompts must have an existing current-phase file.
 `prompt_path` tracks the current phase's source; `next_prompt` tracks an externally

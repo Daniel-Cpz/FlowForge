@@ -30,7 +30,7 @@ func (s *fakeStore) Claim(ctx context.Context, id, worker uuid.UUID) (*job.Job, 
 	copy.AssignedWorker = &worker
 	return &copy, nil
 }
-func (s *fakeStore) Finalize(ctx context.Context, j *job.Job, status job.Status, result json.RawMessage) error {
+func (s *fakeStore) Finalize(ctx context.Context, j *job.Job, status job.Status, result json.RawMessage, failures ...job.Failure) error {
 	s.finishes++
 	s.liveCleanup = ctx.Err() == nil
 	return s.finishErr
@@ -58,7 +58,7 @@ func (e *fakeExecutor) Execute(context.Context, *job.Job) Outcome {
 	if e.cancel != nil {
 		e.cancel()
 	}
-	return Outcome{job.Succeeded, json.RawMessage(`{}`)}
+	return Outcome{Status: job.Succeeded, Result: json.RawMessage(`{}`)}
 }
 func TestWorkerBoundaries(t *testing.T) {
 	for _, mode := range []string{"success", "terminal", "running", "missing", "malformed", "version", "claim_rejected", "get_error", "claim_error", "finish_error", "ack_error", "shutdown"} {

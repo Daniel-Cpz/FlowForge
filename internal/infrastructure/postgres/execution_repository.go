@@ -14,7 +14,7 @@ import (
 
 // PendingDispatch also reconciles published but still QUEUED work. A Redis
 // restart or lost pre-claim delivery therefore cannot silently strand a job.
-// Recovery restores this intent in the same transaction as RUNNING -> QUEUED.
+// Due retry promotion restores this intent in its RETRYING -> QUEUED transaction.
 func (r *JobRepository) PendingDispatch(ctx context.Context, limit int) ([]uuid.UUID, error) {
 	if limit < 1 || limit > 100 {
 		return nil, job.ErrInvalidInput
@@ -80,7 +80,7 @@ func (r *JobRepository) Claim(ctx context.Context, id, worker uuid.UUID) (*job.J
 	j, err := scanJob(tx.QueryRow(ctx, `UPDATE jobs SET status=$2, assigned_worker=$3,
 	 attempt_count=attempt_count+1, started_at=clock_timestamp(), finished_at=NULL, result=NULL,
 	 lease_expiry=clock_timestamp()+make_interval(secs=>$5)
-	 WHERE id=$1 AND status=$4 AND attempt_count<2147483647
+	 WHERE id=$1 AND status=$4 AND attempt_count<max_attempts
 	 AND EXISTS(SELECT 1 FROM workers WHERE worker_id=$3 AND status IN ('ONLINE','IDLE','BUSY')
 	 AND last_heartbeat>clock_timestamp()-make_interval(secs=>$6))
 	 RETURNING `+columns, id, job.Running, worker, job.Queued, r.leasePolicy.LeaseDuration.Seconds(), r.leasePolicy.OfflineAfter.Seconds()))
@@ -100,10 +100,19 @@ func (r *JobRepository) Claim(ctx context.Context, id, worker uuid.UUID) (*job.J
 	return j, nil
 }
 
-// Finalize requires the owner AND attempt number and commits both records.
-func (r *JobRepository) Finalize(ctx context.Context, j *job.Job, status job.Status, result json.RawMessage) error {
-	if j == nil || j.AssignedWorker == nil || j.Status != job.Running ||
-		(status != job.Succeeded && status != job.Failed) || !job.CanTransition(j.Status, status) || !json.Valid(result) {
+// Finalize commits the exact Attempt and its durable outcome before any ACK.
+func (r *JobRepository) Finalize(ctx context.Context, j *job.Job, status job.Status, result json.RawMessage, failures ...job.Failure) error {
+	if j == nil || j.AssignedWorker == nil || j.Status != job.Running || (status != job.Succeeded && status != job.Failed) || !json.Valid(result) || len(failures) > 1 {
+		return job.ErrInvalidInput
+	}
+	f := job.Failure{Class: job.Permanent, Code: "execution_failed"}
+	if len(failures) == 1 {
+		f = failures[0]
+	}
+	if status == job.Failed && !f.Valid() {
+		return job.ErrInvalidInput
+	}
+	if status == job.Succeeded && len(failures) != 0 {
 		return job.ErrInvalidInput
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -113,27 +122,76 @@ func (r *JobRepository) Finalize(ctx context.Context, j *job.Job, status job.Sta
 		return err
 	}
 	defer rollback(tx)
-	stored, err := scanJob(tx.QueryRow(ctx, `UPDATE jobs SET status=$2, result=$3, finished_at=clock_timestamp()
-	 WHERE id=$1 AND status=$4 AND assigned_worker=$5 AND attempt_count=$6 AND lease_expiry>clock_timestamp() RETURNING `+columns,
-		j.ID, status, result, job.Running, *j.AssignedWorker, j.AttemptCount))
+	current, err := scanJob(tx.QueryRow(ctx, `SELECT `+columns+` FROM jobs WHERE id=$1 AND status='RUNNING' AND assigned_worker=$2 AND attempt_count=$3 AND lease_expiry>clock_timestamp() FOR UPDATE`, j.ID, *j.AssignedWorker, j.AttemptCount))
 	if errors.Is(err, job.ErrNotFound) {
 		return job.ErrLeaseLost
 	}
 	if err != nil {
 		return err
 	}
-	res, err := tx.Exec(ctx, `UPDATE job_attempts SET status=$4, result=$5, finished_at=$6
-	 WHERE job_id=$1 AND worker_id=$2 AND attempt_number=$3 AND status=$7`,
-		j.ID, *j.AssignedWorker, j.AttemptCount, status, result, stored.FinishedAt, job.Running)
+	stored, err := r.finish(ctx, tx, current, status, result, f, false)
 	if err != nil {
 		return err
-	}
-	if res.RowsAffected() != 1 {
-		return job.ErrInvalidStoredData
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return err
 	}
 	*j = *stored
 	return nil
+}
+
+// finish is used by normal finalization and expired-lease recovery. Its caller
+// holds the Job row lock. SQL rechecks the fence against current database time.
+func (r *JobRepository) finish(ctx context.Context, tx pgx.Tx, current *job.Job, status job.Status, result json.RawMessage, f job.Failure, expired bool) (*job.Job, error) {
+	owner := *current.AssignedWorker
+	var now time.Time
+	if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
+		return nil, err
+	}
+	target := *current
+	delay := r.retryPolicy.BaseDelay
+	var code *string
+	if status == job.Failed {
+		if f.Class == job.Retryable && current.AttemptCount < current.MaxAttempts {
+			var err error
+			delay, err = r.retryPolicy.Delay(current.AttemptCount, r.jitter)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if err := target.Fail(f, now, delay); err != nil {
+			return nil, err
+		}
+		code = &f.Code
+	} else {
+		if err := target.Transition(status); err != nil {
+			return nil, err
+		}
+		target.LeaseExpiry = nil
+	}
+	predicate := `lease_expiry>clock_timestamp()`
+	if expired {
+		predicate = `lease_expiry<=clock_timestamp()`
+	}
+	stored, err := scanJob(tx.QueryRow(ctx, `UPDATE jobs SET status=$4,result=$5,assigned_worker=$6,lease_expiry=NULL,
+ retry_at=CASE WHEN $4='RETRYING' THEN clock_timestamp()+make_interval(secs=>$7) ELSE NULL END,
+ finished_at=CASE WHEN $4='RETRYING' THEN NULL ELSE clock_timestamp() END
+ WHERE id=$1 AND status='RUNNING' AND assigned_worker=$2 AND attempt_count=$3 AND `+predicate+` RETURNING `+columns,
+		current.ID, owner, current.AttemptCount, target.Status, result, target.AssignedWorker, delay.Seconds()))
+	if errors.Is(err, job.ErrNotFound) {
+		return nil, job.ErrLeaseLost
+	}
+	if err != nil {
+		return nil, err
+	}
+	// Attempt completion time is independent of the later retry/Job completion.
+	res, err := tx.Exec(ctx, `UPDATE job_attempts SET status=$4,result=$5,error=$6,finished_at=COALESCE($7,clock_timestamp())
+ WHERE job_id=$1 AND worker_id=$2 AND attempt_number=$3 AND status='RUNNING'`, current.ID, owner, current.AttemptCount, status, result, code, stored.FinishedAt)
+	if err != nil {
+		return nil, err
+	}
+	if res.RowsAffected() != 1 {
+		return nil, job.ErrInvalidStoredData
+	}
+	return stored, nil
 }

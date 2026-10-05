@@ -50,11 +50,6 @@ func TestLeaseRecoveryConcurrentFencingAndHistory(t *testing.T) {
 	repo := leaseRepo(t, pool)
 	a, b := registered(t, repo), registered(t, repo)
 	j := createSleep(t, pool, `{"duration_ms":0}`)
-	// max_attempts is stored metadata until Phase 5 accounting, not a limit
-	// that can permanently strand a crashed RUNNING job during this phase.
-	if _, err := pool.Exec(t.Context(), `UPDATE jobs SET max_attempts=1 WHERE id=$1`, j.ID); err != nil {
-		t.Fatal(err)
-	}
 	old, err := repo.Claim(t.Context(), j.ID, a)
 	if err != nil {
 		t.Fatal(err)
@@ -118,13 +113,14 @@ func TestLeaseRecoveryConcurrentFencingAndHistory(t *testing.T) {
 		t.Fatal("multiple effective recoveries", total)
 	}
 	queued, err := repo.GetByID(t.Context(), j.ID)
-	if err != nil || queued.Status != job.Queued || queued.AttemptCount != 1 || queued.LeaseExpiry != nil || queued.AssignedWorker != nil {
+	if err != nil || queued.Status != job.Retrying || queued.RetryAt == nil || queued.AttemptCount != 1 || queued.LeaseExpiry != nil || queued.AssignedWorker != nil {
 		t.Fatal("not safely requeued", err)
 	}
 	var marked *time.Time
 	if err := pool.QueryRow(t.Context(), `SELECT published_at FROM job_dispatch WHERE job_id=$1`, j.ID).Scan(&marked); err != nil || marked != nil {
 		t.Fatal("intent not restored", err)
 	}
+	forceDue(t, pool, repo, j.ID)
 	newer, err := repo.Claim(t.Context(), j.ID, b)
 	if err != nil || newer.AttemptCount != 2 {
 		t.Fatal("new attempt missing", err)
@@ -159,7 +155,7 @@ func TestLeaseRecoveryIntentFailureRollsBackAndMissingAttempt(t *testing.T) {
 		t.Fatal(err)
 	}
 	expire(t, pool, j.ID)
-	if _, err := pool.Exec(t.Context(), `UPDATE job_dispatch SET published_at=clock_timestamp(); ALTER TABLE job_dispatch ADD CONSTRAINT test_recovery_intent CHECK(published_at IS NOT NULL)`); err != nil {
+	if _, err := pool.Exec(t.Context(), `ALTER TABLE jobs ADD CONSTRAINT test_recovery_schedule CHECK(status<>'RETRYING')`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.RecoverExpired(t.Context(), 100); err == nil {
@@ -173,7 +169,7 @@ func TestLeaseRecoveryIntentFailureRollsBackAndMissingAttempt(t *testing.T) {
 	if err != nil || got.Status != job.Running {
 		t.Fatal("job escaped rollback", err)
 	}
-	if _, err := pool.Exec(t.Context(), `ALTER TABLE job_dispatch DROP CONSTRAINT test_recovery_intent; DELETE FROM job_attempts`); err != nil {
+	if _, err := pool.Exec(t.Context(), `ALTER TABLE jobs DROP CONSTRAINT test_recovery_schedule; DELETE FROM job_attempts`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.RecoverExpired(t.Context(), 100); !errors.Is(err, job.ErrInvalidStoredData) {
@@ -272,6 +268,7 @@ func TestRecoveredDispatchPublishMarkerFailureAndNotificationLoss(t *testing.T) 
 	if r, err := repo.RecoverExpired(t.Context(), 100); err != nil || len(r) != 1 {
 		t.Fatal(err)
 	}
+	forceDue(t, pool, repo, j.ID)
 	bad := redisinfra.NewClient("127.0.0.1:1", "", 0)
 	defer bad.Close()
 	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
@@ -389,7 +386,7 @@ func TestFinalizeExpiryRecoveryRace(t *testing.T) {
 		t.Fatal("expired graceful finalize accepted")
 	}
 	got, err := repo.GetByID(t.Context(), j.ID)
-	if err != nil || got.Status != job.Queued {
+	if err != nil || got.Status != job.Retrying {
 		t.Fatal("expiry race stranded job", err)
 	}
 }
@@ -424,6 +421,9 @@ func TestWorkerLeaseMigrationBackfillAndDown(t *testing.T) {
 	if err := migrations.Run(ctx, pool, "down"); err != nil {
 		t.Fatal(err)
 	}
+	if err := migrations.Run(ctx, pool, "down"); err != nil {
+		t.Fatal(err)
+	}
 	owner, id := uuid.New(), uuid.New()
 	if _, err := pool.Exec(ctx, `INSERT INTO jobs(id,type,payload,status,assigned_worker,attempt_count,started_at) VALUES($1,'SLEEP','{}','RUNNING',$2,1,clock_timestamp());`, id, owner); err != nil {
 		t.Fatal(err)
@@ -437,6 +437,9 @@ func TestWorkerLeaseMigrationBackfillAndDown(t *testing.T) {
 	repo := leaseRepo(t, pool)
 	if recovered, err := repo.RecoverExpired(ctx, 100); err != nil || len(recovered) != 1 {
 		t.Fatal("legacy running not recoverable", err)
+	}
+	if err := migrations.Run(ctx, pool, "down"); err != nil {
+		t.Fatal(err)
 	}
 	if err := migrations.Run(ctx, pool, "down"); err != nil {
 		t.Fatal(err)

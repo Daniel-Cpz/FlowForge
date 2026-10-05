@@ -23,3 +23,5 @@ What costs, failure modes and follow-up work result?
 ## Alternatives
 Which simpler or different approaches were considered?
 ```
+
+- [0006 — Budgeted retries and submission idempotency](0006-budgeted-retries-and-submission-idempotency.md)

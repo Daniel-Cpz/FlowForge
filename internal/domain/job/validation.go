@@ -14,7 +14,7 @@ import (
 func (j *Job) Validate() error {
 	if j.ID == uuid.Nil || !j.Status.Valid() || !validTime(j.CreatedAt) ||
 		!validText(j.Type, 128) || j.Priority < 0 || j.Priority > 100 ||
-		j.AttemptCount < 0 || j.MaxAttempts < 1 || j.MaxAttempts > 100 ||
+		j.AttemptCount < 0 || j.AttemptCount > j.MaxAttempts || j.MaxAttempts < 1 || j.MaxAttempts > 100 ||
 		j.Timeout < 1 || j.Timeout > 86400 || !json.Valid(j.Payload) ||
 		(len(j.Result) != 0 && !json.Valid(j.Result)) {
 		return ErrInvalidInput
@@ -25,7 +25,10 @@ func (j *Job) Validate() error {
 	if j.AssignedWorker != nil && *j.AssignedWorker == uuid.Nil {
 		return ErrInvalidInput
 	}
-	for _, timestamp := range []*time.Time{j.LeaseExpiry, j.StartedAt, j.FinishedAt} {
+	if (j.Status == Retrying) != (j.RetryAt != nil) || (j.Status == Retrying && (j.AssignedWorker != nil || j.LeaseExpiry != nil || j.AttemptCount >= j.MaxAttempts)) {
+		return ErrInvalidInput
+	}
+	for _, timestamp := range []*time.Time{j.LeaseExpiry, j.RetryAt, j.StartedAt, j.FinishedAt} {
 		if timestamp != nil && !validTime(*timestamp) {
 			return ErrInvalidInput
 		}
