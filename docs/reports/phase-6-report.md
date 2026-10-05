@@ -2,16 +2,13 @@
 
 ## Phase
 
-Phase 6 — Priority + Timeout + Cancellation + Dead Letter Management
+Phase 6
 
 ## Status
 
 COMPLETED
 
-Technical acceptance and isolated smoke PASS. Ownership remains in_progress while
-this implementation/report checkpoint is prepared. Real Git references and final
-completed state are filled together only after checkpoint/tag publication and
-prospective-state validation; this report does not claim its own commit SHA.
+Technical acceptance, isolated smoke and implementation/tag publication PASS. Claim remained in_progress through checkpoint publication. This metadata follow-up records the real checkpoint and publishes completed state only after its prospective validation.
 
 ## Summary
 
@@ -89,7 +86,9 @@ roadmap), persistent per-job logs, DLQ UI, dashboard, observability, benchmarks 
 deployment remain planned. No future Phase prompt generated or processed-counter
 advance performed by Codex.
 
-## Tests Executed
+## Tests
+
+### Tests Executed
 
 Windows PowerShell; existing Go 1.26.8 Linux Docker tools, PostgreSQL/Redis real
 services. FLOWFORGE_INTEGRATION=1 enabled. Each test creates a verified random
@@ -106,7 +105,7 @@ schema and random Redis namespace; no public application data or FLUSHDB.
 - `./scripts/phase6-smoke.ps1`: PASS; PowerShell syntax parse PASS.
 - `git diff --check`: PASS; historical migrations/reports/prompts diff empty.
 - Readonly retained DB/services/generated-resource audit: PASS (details below).
-- Prospective completed-state and Git evidence: recorded after publication below.
+- Prospective completed-state validator: PASS after normalizing the Phase field to exact Phase 6; actual checkpoint/tag/report evidence validated before atomic replacement. The validator also reads checkpoint report contents; publish a corrected report checkpoint before final state. Final state retains last_processed_phase=5, next_prompt=null.
 
 ## Test Results
 
@@ -121,7 +120,7 @@ SKIP LOCKED can skip a Job while Cancel holds its row. Test now verifies subsequ
 bounded recovery converges after request commit, rather than assuming one scan.
 Final full/race rerun above passes. This is a documented maintenance latency, not
 lost intent or extra retry. Migration down tests now remove 000006 before testing
-historical 000005/000004/000003 behavior. No required test skip counted as PASS.
+historical 000005/000004/000003 behavior. No required test skip counted as PASS. Prospective validator initially rejected the extended Phase identity line and missing Tests/Git container headings; normalized it to exact Phase 6 and grouped Tests Executed and Git evidence under their required containers in this metadata-only follow-up. No invalid completed state was published.
 
 NOT RUN: performance/throughput/starvation-aging benchmark, production deployment,
 external business-effect exactly-once and uncooperative-executor termination tests;
@@ -197,21 +196,25 @@ retained schema version=4 unchanged. Smoke build/cache image remains outside Git
 - 000006 down loses cancel intent and original submission-budget metadata; stop
   processes and evaluate data before rollback, no mixed-version recovery claim.
 
-## Git Branch
+## Git
+
+Real checkpoint/tag and publication evidence follow.
+
+### Git Branch
 
 codex/phase1-api-correctness
 
-## Git Commit
+### Git Commit
 
-Pending real implementation/report checkpoint SHA; filled in metadata follow-up.
+Implementation revision: 414da6b9bcb3d7cf8c1a9dd83d6cbeead533fd49. Validated report checkpoint is the subsequent format-repair commit; real identity is recorded in final metadata.
 
-## Git Tag
+### Git Tag
 
-Pending annotated phase6-control-dlq targeting the implementation/report checkpoint.
+Final annotated phase6-control-dlq-v2 will target the validated report checkpoint. Earlier phase6-control-dlq remains a published in_progress artifact at implementation revision 414da6b; its report format did not satisfy completed-state validation and it is not the completion tag. No tag/history rewriting.
 
-## GitHub Push Result
+### GitHub Push Result
 
-Pending checkpoint/tag/state publication. No completed state published yet.
+PASS: checkpoint/annotated tag pushed atomically and remote branch/peeled tag verified. This report/state metadata is published in the follow-up commit; prospective completed-state validation is required before replacement.
 main remains aa96182a037bfc502927125246e07733d0e8dbd3; no automatic merge/history rewrite.
 
 ## Documentation Updated
