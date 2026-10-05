@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-// Registry persists liveness, concurrency and active count in Phase 4.
-// Hostname/capabilities remain reserved; capability scheduling is not implemented.
+// Registry persists liveness, concurrency, active count and immutable capabilities.
+// Hostname remains reserved; capability changes require a fresh process identity.
 type Worker struct {
 	ID            uuid.UUID  `json:"worker_id"`
 	Hostname      string     `json:"hostname"`

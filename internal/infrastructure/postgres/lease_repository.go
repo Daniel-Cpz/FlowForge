@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/Daniel-Cpz/FlowForge/internal/domain/capability"
 	"time"
 
 	"github.com/Daniel-Cpz/FlowForge/internal/domain/job"
@@ -13,13 +14,20 @@ import (
 )
 
 func (r *JobRepository) RegisterWorker(ctx context.Context, id uuid.UUID, concurrency int) error {
+	return r.RegisterWorkerCapabilities(ctx, id, concurrency, nil)
+}
+func (r *JobRepository) RegisterWorkerCapabilities(ctx context.Context, id uuid.UUID, concurrency int, values []string) error {
+	capabilities, err := capability.Normalize(values)
+	if err != nil {
+		return job.ErrInvalidInput
+	}
 	if id == uuid.Nil || concurrency < 1 || concurrency > 32 {
 		return job.ErrInvalidInput
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	result, err := r.pool.Exec(ctx, `INSERT INTO workers(worker_id,status,last_heartbeat,concurrency,active_jobs)
- VALUES($1,'ONLINE',clock_timestamp(),$2,0) ON CONFLICT(worker_id) DO NOTHING`, id, concurrency)
+	result, err := r.pool.Exec(ctx, `INSERT INTO workers(worker_id,status,last_heartbeat,concurrency,active_jobs,capabilities)
+ VALUES($1,'ONLINE',clock_timestamp(),$2,0,$3) ON CONFLICT(worker_id) DO NOTHING`, id, concurrency, capabilities)
 	if err != nil {
 		return err
 	}

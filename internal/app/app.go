@@ -48,7 +48,7 @@ func Run(ctx context.Context, process string) error {
 			return err
 		}
 		queue := redisinfra.NewQueue(redis, cfg.RedisStream, redisinfra.Group)
-		worker, err := execution.NewWithLeasePolicy(repo, queue, execution.Sleep{}, logger, cfg.WorkerConcurrency, cfg.LeasePolicy)
+		worker, err := execution.NewWithLeasePolicy(repo, queue, execution.Sleep{}, logger, cfg.WorkerConcurrency, cfg.LeasePolicy, cfg.WorkerCapabilities...)
 		if err != nil {
 			return err
 		}
@@ -59,12 +59,15 @@ func Run(ctx context.Context, process string) error {
 		func(ctx context.Context) error {
 			// Readiness includes the schema used by this API, not just a TCP connection.
 			_, err := pool.Exec(ctx, `SELECT id, type, status, priority, payload, result, attempt_count, max_attempts, timeout,
-			 idempotency_key, assigned_worker, lease_expiry, retry_at, cancel_requested_at, submission_max_attempts, created_at, started_at, finished_at FROM jobs LIMIT 0`)
+			 idempotency_key, assigned_worker, lease_expiry, retry_at, cancel_requested_at, submission_max_attempts, scheduled_at,required_capabilities,schedule_id,scheduled_for,created_at, started_at, finished_at FROM jobs LIMIT 0`)
 			if err == nil {
 				_, err = pool.Exec(ctx, `SELECT job_id,created_at,published_at FROM job_dispatch LIMIT 0`)
 			}
 			if err == nil {
-				_, err = pool.Exec(ctx, `SELECT worker_id,status,last_heartbeat,concurrency,active_jobs FROM workers LIMIT 0`)
+				_, err = pool.Exec(ctx, `SELECT worker_id,status,last_heartbeat,concurrency,active_jobs,capabilities FROM workers LIMIT 0`)
+			}
+			if err == nil {
+				_, err = pool.Exec(ctx, `SELECT id,status,next_run_at,interval_seconds FROM job_schedules LIMIT 0`)
 			}
 			return err
 		})

@@ -197,12 +197,7 @@ func TestIdempotentFirstCreateRollbackAndSafeDatabaseError(t *testing.T) {
 func TestPhase5MigrationDuplicatePreflightAndNormalization(t *testing.T) {
 	pool := migratedDatabase(t)
 	ctx := t.Context()
-	if e := migrations.Run(ctx, pool, "down"); e != nil {
-		t.Fatal(e)
-	}
-	if e := migrations.Run(ctx, pool, "down"); e != nil {
-		t.Fatal(e)
-	}
+	downgradeTo(t, pool, 4)
 	id1, id2 := uuid.New(), uuid.New()
 	if _, e := pool.Exec(ctx, `INSERT INTO jobs(id,type,payload,idempotency_key) VALUES($1,'SLEEP','{}','legacy-duplicate'),($2,'SLEEP','{}','legacy-duplicate')`, id1, id2); e != nil {
 		t.Fatal(e)
@@ -229,12 +224,7 @@ func TestPhase5MigrationDuplicatePreflightAndNormalization(t *testing.T) {
 	if e != nil || got.AttemptCount != 2 || got.MaxAttempts != 2 || got.Status != job.DeadLetter {
 		t.Fatal("legacy budget not preserved/frozen", got, e)
 	}
-	if e := migrations.Run(ctx, pool, "down"); e != nil {
-		t.Fatal(e)
-	}
-	if e := migrations.Run(ctx, pool, "down"); e != nil {
-		t.Fatal(e)
-	}
+	downgradeTo(t, pool, 4)
 	if _, e := pool.Exec(ctx, `UPDATE jobs SET attempt_count=101 WHERE id=$1`, id1); e != nil {
 		t.Fatal(e)
 	}

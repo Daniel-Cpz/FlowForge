@@ -1,6 +1,6 @@
 # Architecture
 
-Status: Phases 0–6 implemented. PostgreSQL is authoritative; Redis transports notifications.
+Status: Phases 0–7 implemented. PostgreSQL is authoritative; Redis transports notifications.
 
 ## Boundaries
 
@@ -22,7 +22,7 @@ The global exact non-null key unique index arbitrates concurrent writers.
 The first writer inserts Job and dispatch intent in one transaction (201).
 A conflicting insert reads the committed winner using a new READ COMMITTED
 statement, locks it for comparison, and compares type, JSONB payload, priority,
-original submission_max_attempts and timeout in PostgreSQL. Equal canonical input returns the original
+original submission_max_attempts, timeout, normalized scheduled_at and canonical required_capabilities in PostgreSQL. Equal canonical input returns the original
 Job (200), including its current execution state. Different input returns 409
 IDEMPOTENCY_CONFLICT without mutation. Null keys always create independent Jobs.
 CreateDisposition explicitly distinguishes creation and replay; times/IDs are not
@@ -113,10 +113,10 @@ effect. External effects can repeat if execution happens before a failed DB comm
 Leases fence DB writes only; future executors need business-specific dedup/fencing.
 
 Local development only: no authentication, tenant isolation, Redis TLS, admission
-control, priority aging, scheduled/capability-aware work, persistent per-job logs,
+control, priority aging, cron/editable schedules, persistent per-job logs,
 DLQ UI, metrics/tracing, benchmarks or deployment automation. Stream,
 consumer, outbox and key retention are unbounded. SLEEP remains the only production
-executor. See ADRs 0003–0007, lifecycle, worker operations and independent reports.
+executor. See ADRs 0003–0008, lifecycle, worker operations and independent reports.
 
 ## Phase 6 scheduling and control
 
@@ -155,3 +155,24 @@ creation-time cursors, not a new completion-time encoding; Attempts history is
 bounded by the global 100-attempt budget. Error codes are sanitized; there is no
 persistent application-log subsystem, DLQ UI or authorization layer. Operator
 resolution of retained legacy duplicate keys remains required before 000005+.
+## Phase 7 time, capabilities and recurring coordination
+
+PostgreSQL PendingDispatch filters null/due scheduled_at. Claim compares priority
+only within the live worker's due, compatible QUEUED candidate set; requirements
+must be contained in immutable registry capabilities. Canonical arrays have DB
+checks; registration/heartbeat cannot mutate an identity's set. No capable worker
+means durable backlog. Global stream mismatch consumes no Attempt and ACKs only
+the notification; ordinary 30s intent reconciliation enables later capable work.
+
+Every worker's maintenance loop materializes at most 100 due ACTIVE templates
+with FOR UPDATE SKIP LOCKED. Job, intent, unique (schedule_id,scheduled_for) and
+next_run_at advancement share a transaction. Before-commit crash rolls all back;
+after-commit restart sees the cursor. Redis failure retains intent. Missed runs
+coalesce to one oldest due occurrence, skipping middle intervals and preserving
+the interval grid. Schedule Cancel locks the same row and leaves existing Jobs
+untouched. Retry/redrive retains requirement and occurrence identity.
+
+Append-only 000007 keeps historical migrations. Stop processes before up/down;
+down removes templates and scheduling/capability attribution metadata while
+retaining Jobs/Attempts. Retained development schema remains 4 with its legacy
+key conflict. See [contract](scheduling.md) and [ADR 0008](decisions/0008-time-capabilities-recurring-schedules.md).

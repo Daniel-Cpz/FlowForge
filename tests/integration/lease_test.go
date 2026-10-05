@@ -418,15 +418,7 @@ func TestLeaseDatabaseUnavailableDoesNotFabricateSuccess(t *testing.T) {
 func TestWorkerLeaseMigrationBackfillAndDown(t *testing.T) {
 	pool := migratedDatabase(t)
 	ctx := t.Context()
-	if err := migrations.Run(ctx, pool, "down"); err != nil {
-		t.Fatal(err)
-	}
-	if err := migrations.Run(ctx, pool, "down"); err != nil {
-		t.Fatal(err)
-	}
-	if err := migrations.Run(ctx, pool, "down"); err != nil {
-		t.Fatal(err)
-	}
+	downgradeTo(t, pool, 3)
 	owner, id := uuid.New(), uuid.New()
 	if _, err := pool.Exec(ctx, `INSERT INTO jobs(id,type,payload,status,assigned_worker,attempt_count,started_at) VALUES($1,'SLEEP','{}','RUNNING',$2,1,clock_timestamp());`, id, owner); err != nil {
 		t.Fatal(err)
@@ -441,15 +433,7 @@ func TestWorkerLeaseMigrationBackfillAndDown(t *testing.T) {
 	if recovered, err := repo.RecoverExpired(ctx, 100); err != nil || len(recovered) != 1 {
 		t.Fatal("legacy running not recoverable", err)
 	}
-	if err := migrations.Run(ctx, pool, "down"); err != nil {
-		t.Fatal(err)
-	}
-	if err := migrations.Run(ctx, pool, "down"); err != nil {
-		t.Fatal(err)
-	}
-	if err := migrations.Run(ctx, pool, "down"); err != nil {
-		t.Fatal(err)
-	}
+	downgradeTo(t, pool, 3)
 	var table *string
 	if err := pool.QueryRow(ctx, `SELECT to_regclass('workers')::text`).Scan(&table); err != nil || table != nil {
 		t.Fatal("workers down", err)

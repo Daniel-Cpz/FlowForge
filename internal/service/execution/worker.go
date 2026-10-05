@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Daniel-Cpz/FlowForge/internal/domain/capability"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -28,6 +29,7 @@ type Queue interface {
 // Store and Queue implementations must support concurrent calls. Sleep is
 // stateless; slog is concurrency safe. Each claimed Job belongs to one slot.
 type Worker struct {
+	capabilities []string
 	store        Store
 	queue        Queue
 	executor     Executor
@@ -48,7 +50,11 @@ func New(store Store, queue Queue, executor Executor, logger *slog.Logger) *Work
 func NewWithConcurrency(store Store, queue Queue, executor Executor, logger *slog.Logger, concurrency int) (*Worker, error) {
 	return NewWithLeasePolicy(store, queue, executor, logger, concurrency, domainworker.DefaultLeasePolicy())
 }
-func NewWithLeasePolicy(store Store, queue Queue, executor Executor, logger *slog.Logger, concurrency int, policy domainworker.LeasePolicy) (*Worker, error) {
+func NewWithLeasePolicy(store Store, queue Queue, executor Executor, logger *slog.Logger, concurrency int, policy domainworker.LeasePolicy, values ...string) (*Worker, error) {
+	capabilities, err := capability.Normalize(values)
+	if err != nil {
+		return nil, err
+	}
 	if concurrency < 1 || concurrency > 32 {
 		return nil, errors.New("worker concurrency must be in 1..32")
 	}
@@ -58,6 +64,7 @@ func NewWithLeasePolicy(store Store, queue Queue, executor Executor, logger *slo
 	id := uuid.New()
 	w := &Worker{store: store, queue: queue, executor: executor, logger: logger.With("worker_id", id, "configured_concurrency", concurrency), id: id, concurrency: concurrency, policy: policy}
 	w.leases, _ = store.(LeaseStore)
+	w.capabilities = capabilities
 	return w, nil
 }
 

@@ -2,6 +2,7 @@ package job
 
 import (
 	"encoding/json"
+	"github.com/Daniel-Cpz/FlowForge/internal/domain/capability"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -12,6 +13,9 @@ import (
 // Validate checks values, not execution policy or state-transition permissions.
 // Services use it before persistence; repositories use it after reading data.
 func (j *Job) Validate() error {
+	if !capability.Canonical(j.RequiredCapabilities) || (j.ScheduleID == nil) != (j.ScheduledFor == nil) || (j.ScheduleID != nil && *j.ScheduleID == uuid.Nil) {
+		return ErrInvalidInput
+	}
 	if j.ID == uuid.Nil || !j.Status.Valid() || !validTime(j.CreatedAt) ||
 		!validText(j.Type, 128) || j.Priority < 0 || j.Priority > 100 ||
 		j.AttemptCount < 0 || j.AttemptCount > j.MaxAttempts || j.MaxAttempts < 1 || j.MaxAttempts > 100 ||
@@ -31,7 +35,7 @@ func (j *Job) Validate() error {
 	if j.CancelRequestedAt != nil && j.Status != Running && j.Status != Cancelled {
 		return ErrInvalidInput
 	}
-	for _, timestamp := range []*time.Time{j.LeaseExpiry, j.RetryAt, j.StartedAt, j.FinishedAt, j.CancelRequestedAt} {
+	for _, timestamp := range []*time.Time{j.LeaseExpiry, j.RetryAt, j.StartedAt, j.FinishedAt, j.CancelRequestedAt, j.ScheduledAt, j.ScheduledFor} {
 		if timestamp != nil && !validTime(*timestamp) {
 			return ErrInvalidInput
 		}

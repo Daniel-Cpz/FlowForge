@@ -24,6 +24,7 @@ func (r *JobRepository) PendingDispatch(ctx context.Context, limit int) ([]uuid.
 	rows, err := r.pool.Query(ctx, `SELECT d.job_id FROM job_dispatch d JOIN jobs j ON j.id=d.job_id
 	 WHERE j.status=$1 AND (d.published_at IS NULL OR d.published_at < CURRENT_TIMESTAMP - INTERVAL '30 seconds')
 	 AND j.attempt_count<j.max_attempts
+	 AND (j.scheduled_at IS NULL OR j.scheduled_at<=clock_timestamp())
 	 ORDER BY j.priority DESC, j.created_at ASC, j.id ASC LIMIT $2`, job.Queued, limit)
 	if err != nil {
 		return nil, fmt.Errorf("pending dispatch: %w", err)
@@ -68,10 +69,10 @@ func (r *JobRepository) Claim(ctx context.Context, id, worker uuid.UUID) (*job.J
 	defer rollback(tx)
 	// Serialize registry expiry with a new claim, without holding a database
 	// transaction while executing or publishing. Worker rows precede job rows.
-	var live int
-	err = tx.QueryRow(ctx, `SELECT 1 FROM workers WHERE worker_id=$1
+	var capabilities []string
+	err = tx.QueryRow(ctx, `SELECT capabilities FROM workers WHERE worker_id=$1
 	 AND status IN ('ONLINE','IDLE','BUSY') AND last_heartbeat>clock_timestamp()-make_interval(secs=>$2)
-	 FOR SHARE`, worker, r.leasePolicy.OfflineAfter.Seconds()).Scan(&live)
+	 FOR SHARE`, worker, r.leasePolicy.OfflineAfter.Seconds()).Scan(&capabilities)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, job.ErrInvalidTransition
 	}
@@ -84,7 +85,7 @@ func (r *JobRepository) Claim(ctx context.Context, id, worker uuid.UUID) (*job.J
 		return nil, err
 	}
 	var first uuid.UUID
-	err = tx.QueryRow(ctx, `SELECT id FROM jobs WHERE status='QUEUED' AND attempt_count<max_attempts ORDER BY priority DESC,created_at,id LIMIT 1`).Scan(&first)
+	err = tx.QueryRow(ctx, `SELECT id FROM jobs WHERE status='QUEUED' AND attempt_count<max_attempts AND (scheduled_at IS NULL OR scheduled_at<=clock_timestamp()) AND required_capabilities<@$1::text[] ORDER BY priority DESC,created_at,id LIMIT 1`, capabilities).Scan(&first)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, job.ErrInvalidTransition
 	}
@@ -93,7 +94,7 @@ func (r *JobRepository) Claim(ctx context.Context, id, worker uuid.UUID) (*job.J
 	}
 	if first != id {
 		var eligible bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM jobs WHERE id=$1 AND status='QUEUED' AND attempt_count<max_attempts)`, id).Scan(&eligible); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM jobs WHERE id=$1 AND status='QUEUED' AND attempt_count<max_attempts AND (scheduled_at IS NULL OR scheduled_at<=clock_timestamp()) AND required_capabilities<@$2::text[])`, id, capabilities).Scan(&eligible); err != nil {
 			return nil, err
 		}
 		if eligible {
@@ -105,11 +106,13 @@ func (r *JobRepository) Claim(ctx context.Context, id, worker uuid.UUID) (*job.J
 	 attempt_count=attempt_count+1, started_at=clock_timestamp(), finished_at=NULL, result=NULL,
 	 lease_expiry=clock_timestamp()+make_interval(secs=>$5)
 	 WHERE id=$1 AND status=$4 AND attempt_count<max_attempts
+	 AND (scheduled_at IS NULL OR scheduled_at<=clock_timestamp()) AND required_capabilities<@$7::text[]
 	 AND NOT EXISTS(SELECT 1 FROM jobs p WHERE p.status='QUEUED' AND p.attempt_count<p.max_attempts
+	 AND (p.scheduled_at IS NULL OR p.scheduled_at<=clock_timestamp()) AND p.required_capabilities<@$7::text[]
 	 AND (p.priority>jobs.priority OR (p.priority=jobs.priority AND (p.created_at,p.id)<(jobs.created_at,jobs.id))))
 	 AND EXISTS(SELECT 1 FROM workers WHERE worker_id=$3 AND status IN ('ONLINE','IDLE','BUSY')
 	 AND last_heartbeat>clock_timestamp()-make_interval(secs=>$6))
-	 RETURNING `+columns, id, job.Running, worker, job.Queued, r.leasePolicy.LeaseDuration.Seconds(), r.leasePolicy.OfflineAfter.Seconds()))
+	 RETURNING `+columns, id, job.Running, worker, job.Queued, r.leasePolicy.LeaseDuration.Seconds(), r.leasePolicy.OfflineAfter.Seconds(), capabilities))
 	if errors.Is(err, job.ErrNotFound) {
 		return nil, job.ErrInvalidTransition
 	}

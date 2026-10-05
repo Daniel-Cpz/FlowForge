@@ -32,11 +32,21 @@ func (w *Worker) ensureRegistered(ctx context.Context) error {
 	if w.registered {
 		return nil
 	}
-	if err := w.leases.RegisterWorker(ctx, w.id, w.concurrency); err != nil {
+	var err error
+	if registry, ok := w.leases.(interface {
+		RegisterWorkerCapabilities(context.Context, uuid.UUID, int, []string) error
+	}); ok {
+		err = registry.RegisterWorkerCapabilities(ctx, w.id, w.concurrency, w.capabilities)
+	} else if len(w.capabilities) > 0 {
+		return job.ErrInvalidInput
+	} else {
+		err = w.leases.RegisterWorker(ctx, w.id, w.concurrency)
+	}
+	if err != nil {
 		return err
 	}
 	w.registered = true
-	w.logger.Info("Worker registered", "event", "worker_registered")
+	w.logger.Info("Worker registered", "event", "worker_registered", "capabilities", w.capabilities)
 	return nil
 }
 
@@ -79,6 +89,16 @@ func (w *Worker) recovery(ctx context.Context) error {
 				logger := w.logger.With("job_id", r.JobID, "expired_worker_id", r.WorkerID, "attempt_number", r.AttemptNumber)
 				logger.Warn("Execution lease expired", "event", "lease_expired")
 				logger.Info("Expired attempt settled", "event", "recovery_settled", "status", r.Status, "retry_at", r.RetryAt)
+			}
+		}
+		if scheduler, ok := w.store.(interface {
+			MaterializeDue(context.Context, int) ([]uuid.UUID, error)
+		}); ok {
+			ids, scanErr := scheduler.MaterializeDue(ctx, 100)
+			if scanErr != nil && ctx.Err() == nil {
+				w.logger.Warn("Schedule materialization failed", "event", "schedule_scan_failed")
+			} else if len(ids) > 0 {
+				w.logger.Info("Schedule occurrences created", "event", "schedule_materialized", "count", len(ids))
 			}
 		}
 		promoted, err := w.leases.PromoteRetries(ctx, 100)

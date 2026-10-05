@@ -3,6 +3,7 @@ package job
 import (
 	"context"
 	"encoding/json"
+	"github.com/Daniel-Cpz/FlowForge/internal/domain/capability"
 	"strings"
 	"time"
 
@@ -15,12 +16,14 @@ type Service struct{ repo domain.Repository }
 func New(repo domain.Repository) *Service { return &Service{repo: repo} }
 
 type CreateInput struct {
-	Type           string          `json:"type"`
-	Priority       int             `json:"priority"`
-	Payload        json.RawMessage `json:"payload"`
-	MaxAttempts    *int            `json:"max_attempts"`
-	Timeout        *int            `json:"timeout"`
-	IdempotencyKey *string         `json:"idempotency_key"`
+	ScheduledAt          *time.Time      `json:"scheduled_at"`
+	RequiredCapabilities []string        `json:"required_capabilities"`
+	Type                 string          `json:"type"`
+	Priority             int             `json:"priority"`
+	Payload              json.RawMessage `json:"payload"`
+	MaxAttempts          *int            `json:"max_attempts"`
+	Timeout              *int            `json:"timeout"`
+	IdempotencyKey       *string         `json:"idempotency_key"`
 }
 
 func (s *Service) Create(ctx context.Context, in CreateInput) (*domain.Job, error) {
@@ -29,6 +32,10 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*domain.Job, erro
 }
 
 func (s *Service) CreateWithDisposition(ctx context.Context, in CreateInput) (*domain.Job, domain.CreateDisposition, error) {
+	caps, err := capability.Normalize(in.RequiredCapabilities)
+	if err != nil {
+		return nil, "", domain.ErrInvalidInput
+	}
 	if len(in.Payload) > 1<<20 {
 		return nil, "", domain.ErrInvalidInput
 	}
@@ -46,6 +53,11 @@ func (s *Service) CreateWithDisposition(ctx context.Context, in CreateInput) (*d
 	if in.IdempotencyKey != nil {
 		key := *in.IdempotencyKey
 		j.IdempotencyKey = &key
+	}
+	j.RequiredCapabilities = caps
+	if in.ScheduledAt != nil {
+		timestamp := in.ScheduledAt.UTC().Truncate(time.Microsecond)
+		j.ScheduledAt = &timestamp
 	}
 	if err := j.Validate(); err != nil {
 		return nil, "", err

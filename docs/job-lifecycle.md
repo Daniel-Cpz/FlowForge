@@ -1,6 +1,6 @@
 # Job lifecycle
 
-Status: Phase 6 priority, attempt timeout, user cancellation and DLQ controls implemented.
+Status: Phases 6–7 control, delayed/capability eligibility and recurring scheduling implemented.
 
 | From | Allowed targets |
 |---|---|
@@ -76,7 +76,7 @@ or retention management is added. Healthy worker/DB/Redis are required for progr
 ## Submission idempotency
 
 The exact non-null global key identifies canonical type, JSONB payload, priority,
-original submission max_attempts and timeout. First submission returns 201; same request replay returns
+original submission max_attempts, timeout, normalized scheduled_at and canonical capabilities. First submission returns 201; same request replay returns
 200 with original Job/Location at any state; different request returns 409
 IDEMPOTENCY_CONFLICT and changes nothing. Null/absent keys always create distinct
 Jobs. Replay creates no Attempt/intent and does not restart terminal work.
@@ -134,3 +134,19 @@ Append-only 000006 provides cancellation metadata, original budget and partial
 indexes, without changing 000001–000005 or resolving retained legacy keys. Its
 down loses cancellation/original-budget metadata; stop processes before schema
 changes and do not use rollback to resume work. Old/new binaries cannot mix.
+## Phase 7 eligibility and recurring occurrences
+
+Future scheduled_at retains QUEUED, with no dispatch/Claim/Attempt/budget change
+before PostgreSQL due time. Waiting is excluded from timeout. Claim also requires
+all capabilities in the live worker's immutable set; priority compares only its
+eligible Jobs. Missing requirements means empty set. No capable worker is QUEUED
+backlog. Rejected notifications ACK without execution; intent reconciles at 30s.
+
+Templates are ACTIVE/CANCELLED, fixed interval 1..604800 seconds. Maintenance
+materializes one oldest due ordinary Job per template per pass, atomically with
+intent and first future interval boundary advancement. Missed middle runs are
+skipped. Unique occurrence identity survives process restart. Schedule cancel
+prevents future materialization only; existing Job states/history continue.
+Job cancel leaves its parent ACTIVE. RetryAt is distinct from scheduled_at;
+retry/redrive preserves original capabilities, priority and occurrence identity.
+See [scheduling contract](scheduling.md) for normalization, API and migration rules.

@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"github.com/Daniel-Cpz/FlowForge/internal/domain/capability"
 	"github.com/Daniel-Cpz/FlowForge/internal/domain/worker"
 	"github.com/Daniel-Cpz/FlowForge/internal/retry"
 	"log/slog"
@@ -14,17 +15,18 @@ import (
 )
 
 type Config struct {
-	Env               string
-	HTTPAddr          string
-	PostgresURL       string
-	RedisAddr         string
-	RedisPassword     string
-	RedisDB           int
-	RedisStream       string
-	LogLevel          slog.Level
-	WorkerConcurrency int
-	LeasePolicy       worker.LeasePolicy
-	RetryPolicy       retry.Policy
+	WorkerCapabilities []string
+	Env                string
+	HTTPAddr           string
+	PostgresURL        string
+	RedisAddr          string
+	RedisPassword      string
+	RedisDB            int
+	RedisStream        string
+	LogLevel           slog.Level
+	WorkerConcurrency  int
+	LeasePolicy        worker.LeasePolicy
+	RetryPolicy        retry.Policy
 }
 
 func value(key, fallback string) string {
@@ -40,6 +42,10 @@ func Load() (Config, error) {
 		RedisStream: value("FLOWFORGE_REDIS_STREAM", "flowforge:jobs:v1")}
 	concurrency := value("FLOWFORGE_WORKER_CONCURRENCY", "1")
 	var err error
+	c.WorkerCapabilities, err = capability.ParseConfig(value("FLOWFORGE_WORKER_CAPABILITIES", ""))
+	if err != nil {
+		return c, fmt.Errorf("invalid FLOWFORGE_WORKER_CAPABILITIES")
+	}
 	c.WorkerConcurrency, err = strconv.Atoi(concurrency)
 	if err != nil || c.WorkerConcurrency < 1 || c.WorkerConcurrency > 32 || strings.IndexFunc(concurrency, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
 		return c, fmt.Errorf("FLOWFORGE_WORKER_CONCURRENCY must be an integer in 1..32")

@@ -1,4 +1,4 @@
-# Worker operations — Phase 6
+# Worker operations — Phase 7
 
 Each process has C fixed slots, one dispatcher, heartbeat and maintenance loop,
 and at most C execution renewers. Consumers use fresh process UUID + slot;
@@ -57,8 +57,8 @@ QUEUED rows normalize to DEAD_LETTER with attempt_budget_exhausted. All Attempt
 history remains. This administrative normalization may change legacy request
 max_attempts metadata; replay compares the current normalized canonical fields.
 Preexisting FAILED outcomes are preserved and not automatically resubmitted.
-Stop all old processes, migrate, then start the compatible binaries. Six down
-calls remove control, retry schema, registry, dispatch, Attempts and Jobs; never use down
+Stop all old processes, migrate, then start the compatible binaries. Seven down
+calls remove scheduling, control, retry schema, registry, dispatch, Attempts and Jobs; never use down
 as recovery. Normalized outcomes/counters are not reversed by 000005 down.
 
 ## Durable scheduling and inspection
@@ -173,3 +173,31 @@ migration or smoke mutates it. Normal services may remain on Phase 4 schema unti
 explicit operator resolution permits 000005+, then 000006. 000006 down loses durable
 cancel intent and original submission budgets: stop workers and evaluate data
 before rolling back. It is not crash recovery or a safe mixed-version rollout.
+## Phase 7 capabilities and recurring maintenance
+
+Set FLOWFORGE_WORKER_CAPABILITIES=cpu,ffmpeg. Empty declares no capabilities.
+Same parser as Job requirements: trim, ASCII lowercase, 1–32 token characters
+[a-z0-9][a-z0-9._-]*, at most 16 input items, deduplicate/sort. Reject blanks,
+controls and non-ASCII token content. Restart after config changes: registry
+capabilities are fixed per UUID and heartbeat cannot alter them. Registration
+logs the canonical set. No capable worker means QUEUED backlog, not failure.
+Priority compares only each worker's due and compatible Jobs.
+
+Existing maintenance runs MaterializeDue alongside recovery/retry promotion,
+bounded to 100 ACTIVE schedules and 3s per transaction. schedule_materialized
+logs the count; schedule_scan_failed preserves PG truth for the next scan.
+Job+intent+occurrence uniqueness+cursor advancement commit together, before
+ordinary dispatch/Claim/Attempt. Fixed intervals skip missed middle runs and
+produce one oldest due occurrence per template per pass. Cancel schedule does
+not cancel materialized Jobs. PG and a healthy worker are required for progress.
+
+Global-stream capability mismatch is ACKed with zero Attempts; reconciliation
+reissues QUEUED intent at 30s, possibly longer under repeated mismatches. No
+routing/fairness SLA. Delayed waiting consumes neither budget nor timeout.
+./scripts/phase7-smoke.ps1 checks delayed, CPU/GPU and concurrent recurring work
+using independent containers, generated DB/key and loopback port. Cleanup and
+retained-data audit must PASS. Normal schema-4 services/data are preserved.
+Migration 000007 appends to unchanged 000001–000006 and does not bypass the
+legacy duplicate-key preflight. Down loses schedule/capability/attribution
+metadata, retaining Jobs/Attempts; stop processes before schema changes.
+See [contract](scheduling.md) and [ADR 0008](decisions/0008-time-capabilities-recurring-schedules.md).

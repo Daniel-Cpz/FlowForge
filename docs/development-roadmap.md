@@ -1,8 +1,8 @@
 # Development roadmap
 
-Phases 0–6 are implemented: foundation, strict API/persistence, durable dispatch,
+Phases 0–7 are implemented: foundation, strict API/persistence, durable dispatch,
 SLEEP execution, multiple workers with bounded concurrency, DB-time lease recovery, budgeted retries/idempotency and priority/timeout/cancellation/DLQ controls.
-Phase 7 onward remains Planned. Authoritative completion status is in
+Phase 7 adds DB-time delayed Jobs, capability-aware Claim and fixed-interval recurring schedules. Phase 8 onward remains Planned. Authoritative completion status is in
 [`automation/state.json`](../automation/state.json). The whole-project
 [`README.md`](../README.md) and each independent report are required on completion.
 See the [protocol](phase-automation.md) and [report template](phase-report-template.md).
@@ -21,16 +21,17 @@ See the [protocol](phase-automation.md) and [report template](phase-report-templ
 | 9 | Prometheus + Grafana + tracing + failure injection + benchmarks |
 | 10 | Cloud deployment + CI/CD |
 
-## Current completion and next handoff
+## Current implementation and next handoff
 
-Phase 6 adds PostgreSQL-authoritative non-preemptive priority, attempt execution
-timeouts with budgeted TIMED_OUT outcomes, durable user cancellation and minimal
-DLQ pagination/Attempts inspect/manual redrive. Historical Attempts are preserved;
-redrive explicitly grants one extra budget and original submission identity stays
-unchanged. Priority aging, persistent logs and DLQ UI are unimplemented.
+Phase 7 implements delayed time eligibility, immutable canonical Worker
+capabilities, per-worker eligible priority, and fixed-interval templates. Bounded
+PG transactions create a unique ordinary Job/intent and advance next_run_at;
+missed middle intervals are skipped. Schedule cancel leaves existing Jobs alone.
+Cron/edit/pause/resume, capability routing, priority aging and dashboard remain
+unimplemented. Phase 8 React/WebSocket remains Planned.
 
-Phase 7 scheduled/capability-aware scheduling remains Planned. External Automation
-must review the Phase 6 report and publish a legitimate next prompt before Codex
-starts another phase. Codex has not generated that prompt or advanced processed
-phase to 6. The retained legacy duplicate-key DB still requires explicit operator
-resolution before upgrading from Phase 4; isolated acceptance is not deployment.
+External Automation must consume the Phase 7 report and publish a legitimate
+next prompt before another phase starts. Codex has not generated that prompt or
+advanced last_processed_phase to 7. The next recommendation is roadmap context.
+Retained duplicate-key data remains schema 4 pending separately authorized
+operator resolution; isolated schema-7 acceptance is not deployment or data repair.

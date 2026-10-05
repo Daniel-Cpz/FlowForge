@@ -97,6 +97,9 @@ commitment was found. `offset` now returns 400.
 | GET | `/api/v1/dead-letter?limit=20&cursor=...` | DEAD_LETTER only, same creation-time cursor order |
 | GET | `/api/v1/jobs/{id}/attempts` | Complete history ordered by attempt_number (at most 100) |
 | POST | `/api/v1/jobs/{id}/retry` | Explicit DEAD_LETTER redrive, +1 budget up to 100, history retained |
+| POST | `/api/v1/schedules` | Fixed-interval template; 201 + Location |
+| GET | `/api/v1/schedules/{id}` | Schedule by UUID; 404 SCHEDULE_NOT_FOUND |
+| POST | `/api/v1/schedules/{id}/cancel` | Idempotent future-occurrence cancellation; existing Jobs continue |
 
 | Create field | Missing | Explicit null | Supplied value |
 |---|---|---|---|
@@ -106,11 +109,13 @@ commitment was found. `offset` now returns 400.
 | `max_attempts` | Default 3 | 400 | Integer 1–100 |
 | `timeout` | Default 300 | 400 | Integer 1–86400 **seconds** |
 | `idempotency_key` | No key | No key | Nonblank string, at most 255 Unicode characters; supplied whitespace is preserved |
+| `scheduled_at` | Immediate | Immediate | RFC3339; UTC microsecond normalization; past is immediately eligible |
+| `required_capabilities` | Empty set | Empty set | At most 16 strings; canonical capability set (below) |
 
 Only those exact lowercase field names are accepted. Unknown, wrong-case,
 duplicate top-level fields (including equivalent escaped key names), and
 server-owned fields return 400. Client-owned `id`, `status`, `result`,
-`attempt_count`, worker/lease fields or timestamps are not accepted.
+`attempt_count`, worker/lease fields or generated timestamps are not accepted.
 Numeric fields require JSON integer notation; strings, fractions and exponent
 notation are rejected. Empty/blank type or key values are rejected.
 
@@ -124,7 +129,7 @@ request envelope rejects duplicates; no recursive custom parser is introduced.
 
 `attempt_count` starts at 0. Unset result, worker, lease and execution timestamps
 serialize as null at creation. Time strings are RFC3339 with optional fractional seconds in
-UTC. A non-null idempotency key is an exact global submission key: same canonical request returns the original Job (200), different request returns 409 `IDEMPOTENCY_CONFLICT`. Null/absent keys always create distinct Jobs. Canonical identity is trimmed type, JSONB-semantic payload, priority, original submission max_attempts and timeout; generated ID/time are excluded. Replay works at RUNNING/RETRYING/terminal states and never redispatches.
+UTC. A non-null idempotency key is an exact global submission key: same canonical request returns the original Job (200), different request returns 409 `IDEMPOTENCY_CONFLICT`. Null/absent keys always create distinct Jobs. Canonical identity is trimmed type, JSONB-semantic payload, priority, original submission max_attempts, timeout, normalized scheduled_at and canonical required_capabilities; generated ID/time are excluded. Replay works at RUNNING/RETRYING/terminal states and never redispatches.
 Priority now governs PostgreSQL Claim; timeout is an attempt execution deadline in seconds. Original submission max_attempts is stored separately from redrive-adjusted execution budget, so keyed replay still compares the original request. Control POST endpoints require no body or query; Attempts accepts no query parameters.
 First create returns the QUEUED representation captured in its Job/outbox transaction;
 a subsequent GET may already show execution progress. JSONB may normalize
@@ -237,6 +242,8 @@ a generic 503.
 
 ### Priority, execution timeout and user control
 
+Priority eligibility also includes the time/capability fences described below.
+
 Priority is non-preemptive: pending publication and Claim rank eligible QUEUED Jobs
 by priority DESC, created_at ASC, id ASC. A short transaction advisory lock serializes
 Claim decisions; a conditional SQL check rejects a lower-ranked delivery without
@@ -303,6 +310,40 @@ ephemeral PostgreSQL and Redis services and runs integration tests. With host-ru
 tests, set `FLOWFORGE_TEST_REDIS_ADDR` (and optional
 `FLOWFORGE_TEST_REDIS_PASSWORD`) as well as the PostgreSQL test URL.
 
+## Delayed, capability-aware and recurring scheduling
+
+Delayed Jobs stay QUEUED until PostgreSQL time reaches scheduled_at, without an
+Attempt before due. Worker capabilities are a canonical immutable set per UUID:
+trim + ASCII lowercase, 1–32 characters matching `[a-z0-9][a-z0-9._-]*`, at most
+16 input items, deduplicate and sort; reject blank/control/non-ASCII tokens.
+Set `FLOWFORGE_WORKER_CAPABILITIES=cpu,ffmpeg`. Claim checks the live worker's
+superset and ranks only its compatible, due Jobs. No capable worker means backlog;
+mismatched notification ACK leaves intent for 30s reconciliation, potentially longer
+under repeated mismatch. Scheduled wait is excluded from execution timeout.
+
+POST /api/v1/schedules takes the Job template fields plus integer interval_seconds
+(1..604800) and optional RFC3339 next_run_at (null/absent defaults to DB now).
+GET /api/v1/schedules/{id} inspects it; POST .../{id}/cancel prevents unmaterialized
+future occurrences idempotently. Existing Jobs continue; Job cancel leaves the
+parent unchanged. No submission key is accepted for schedule templates.
+
+Each worker maintenance loop materializes at most 100 due ACTIVE templates in
+one row-locked transaction: ordinary Job + intent + cursor advancement. The
+unique schedule_id/scheduled_for occurrence prevents duplicate materialization.
+After downtime, one oldest due occurrence is generated per pass, middle missed
+intervals skipped, and next_run_at advances to the first future boundary on the
+original interval grid. Recurring execution still uses existing retry/lease/DLQ.
+Cron, template edits/pause/resume and list UI remain unimplemented.
+
+See [scheduling contract and API examples](docs/scheduling.md) and
+[ADR 0008](docs/decisions/0008-time-capabilities-recurring-schedules.md).
+Run `./scripts/phase7-smoke.ps1` for isolated delayed/capability/recurring process
+acceptance and retained-data audit. Migration 000007 is append-only. Stop
+processes before up/down; down removes scheduling/capability/attribution metadata
+while keeping Jobs/Attempts. Retained development data remains schema 4 with one
+legacy duplicate-key group, pending separately authorized repair; it is not
+upgraded by schema-7 acceptance.
+
 ## Development Commands
 
 | Command | Purpose |
@@ -320,7 +361,7 @@ tests, set `FLOWFORGE_TEST_REDIS_ADDR` (and optional
 
 In Docker, migrations can also run with
 `docker compose run --rm migrate /app/migrate up` (or `down`). Stop API/worker
-before rolling back schema. Six `down` calls remove execution control, retry schema, workers, outbox, attempts and jobs.
+before rolling back schema. Seven `down` calls remove scheduling, execution control, retry schema, workers, outbox, attempts and jobs.
 Migration 000003 backfills dispatch intent for existing QUEUED Jobs. Starting the
 Phase 2 worker therefore processes existing queued work; unsupported legacy
 types become DEAD_LETTER under Phase 5. Migration 000004 adds liveness and expiry indexes; pre-lease
@@ -390,6 +431,11 @@ outbox history have no automatic retention/cleanup yet. All ports bind to loopba
 - Durable queued/retrying/running cancellation and cancellation-aware lease recovery
 - DEAD_LETTER pagination, Attempts inspect, and atomic manual redrive (+1 budget)
 - Phase 6 control/race/rollback regressions and isolated API/process smoke
+- DB-time delayed eligibility and capability-aware priority/Claim fences
+- Immutable canonical Worker capabilities and extended submission identity
+- Fixed-interval templates, atomic bounded occurrence materialization and deduplication
+- Coalesced missed runs, independent schedule/Job cancellation and crash/race validation
+- Phase 7 isolated two-worker API/process smoke with retained-data audit
 
 ### Experimental
 
@@ -397,7 +443,7 @@ None. SLEEP crash recovery is tested; production hardening remains planned.
 
 ### Planned
 
-Scheduled/capability-aware scheduling, priority aging, persistent per-job logs, DLQ UI,
+Cron, schedule edit/pause/resume, capability routing, priority aging, persistent per-job logs, DLQ UI,
 dashboard, metrics/tracing, failure injection, benchmarking and cloud deployment.
 
 ## Roadmap
@@ -406,7 +452,7 @@ Phase 1 delivers **Job Persistence + API Correctness**. Phase 2 implements
 **Redis Queue + Single Worker Execution** with a durable database outbox.
 Phase 3 implements **Multiple Workers + Bounded Concurrency**.
 Phase 4 implements **Heartbeat + Lease + Crash Recovery**.
-Phase 5 implements **Retry + Backoff + Jitter + Submission Idempotency**. Phase 6 implements **Priority + Execution Timeout + User Cancellation + Dead Letter Management**. Phase 7 scheduled/capability-aware scheduling remains Planned and requires external review and a prepared prompt.
+Phase 5 implements **Retry + Backoff + Jitter + Submission Idempotency**. Phase 6 implements **Priority + Execution Timeout + User Cancellation + Dead Letter Management**. Phase 7 implements **DB-time Delayed Jobs + Capability-aware Claim + Fixed-interval Recurring Schedules**. Phase 8 Dashboard/WebSocket remains Planned and requires external review and a prepared prompt.
 See the [Phase 0–10 roadmap](docs/development-roadmap.md) and authoritative phase state.
 The [Phase 1 report](docs/reports/phase-1-report.md) records its validation and Git checkpoint.
 The [Phase 2 report](docs/reports/phase-2-report.md) records execution/durability evidence.
@@ -414,6 +460,7 @@ The [Phase 3 report](docs/reports/phase-3-report.md) records concurrency/process
 The [Phase 4 report](docs/reports/phase-4-report.md) records lease/fencing/recovery evidence.
 The [Phase 5 report](docs/reports/phase-5-report.md) records retry/idempotency/migration evidence.
 The [Phase 6 report](docs/reports/phase-6-report.md) records scheduling/control/DLQ evidence.
+The [Phase 7 report](docs/reports/phase-7-report.md) records delayed/capability/recurring evidence.
 This repository does not claim exactly-once execution. Delivery is at-least-once;
 business side effects need their own idempotency safeguards.
 
@@ -439,7 +486,7 @@ phase report and real Git evidence pass their gates. The separate infrastructure
 report does not complete Phase 1.
 
 FlowForge supports both manual and automation-generated phase prompts. The
-current Phase 6 prompt is `automation`, at `automation/prompts/phase-6.md`.
+current Phase 7 prompt is `automation`, at `automation/prompts/phase-7.md`.
 Phase 1 used manual input, with no prompt file required.
 Automated prompts must have an existing current-phase file.
 `prompt_path` tracks the current phase's source; `next_prompt` tracks an externally

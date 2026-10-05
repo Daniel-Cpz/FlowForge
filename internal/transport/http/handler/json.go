@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"strconv"
+	"time"
 	"unicode/utf16"
 	"unicode/utf8"
 
@@ -60,10 +61,26 @@ func decodeCreateInput(data []byte) (service.CreateInput, error) {
 	var in service.CreateInput
 	err := decodeObject(data, func(name string, raw json.RawMessage) error {
 		// Omitted numeric fields default; explicit null is not an integer.
-		if bytes.Equal(raw, []byte("null")) && name != "payload" && name != "idempotency_key" {
+		if bytes.Equal(raw, []byte("null")) && name != "payload" && name != "idempotency_key" && name != "scheduled_at" && name != "required_capabilities" {
 			return errInvalidJSON
 		}
 		switch name {
+		case "scheduled_at":
+			if bytes.Equal(raw, []byte("null")) {
+				return nil
+			}
+			var v string
+			if err := decodeText(raw, &v); err != nil {
+				return err
+			}
+			timestamp, err := time.Parse(time.RFC3339Nano, v)
+			if err != nil {
+				return err
+			}
+			in.ScheduledAt = &timestamp
+			return nil
+		case "required_capabilities":
+			return json.Unmarshal(raw, &in.RequiredCapabilities)
 		case "type":
 			return decodeText(raw, &in.Type)
 		case "payload":
