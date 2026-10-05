@@ -226,3 +226,14 @@ Optional Prometheus/Grafana/Collector provisioning and generated-project failure
 and HTTP-load harnesses are local evidence tools. They do not participate in the
 durable state machine. See [definitions and limits](observability.md),
 [baseline](benchmarks/phase-9-baseline.md) and [ADR 0010](decisions/0010-observability-cardinality-trace-isolation.md).
+
+## Phase 10 release boundary
+
+Independent production Compose serves lockfile static React with Caddy and routes
+REST/WS to the same API. Private SSH-tunnel mode is selected; optional public
+mode enforces HTTPS/Basic Auth. PG TLS require and password-protected Redis stay
+internal; diagnostics are private. GHCR digests/bundle revision, protected manual
+deploy, flock, backup/drain/migrate/health and atomic release record define the
+single-host maintenance boundary. Failed rollout defaults to safe abort; no
+automatic DB downgrade/guessed image rollback. Real cloud acceptance remains
+pending. See [deployment](deployment.md) and [ADR 0011](decisions/0011-single-host-release-boundaries.md).

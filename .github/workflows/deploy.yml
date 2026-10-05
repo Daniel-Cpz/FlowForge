@@ -1,0 +1,49 @@
+name: Controlled cloud deploy
+on:
+  workflow_dispatch:
+    inputs:
+      release_run_id:
+        description: Successful Release immutable images run ID
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+  packages: read
+concurrency:
+  group: flowforge-cloud-deploy
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: flowforge-cloud
+    steps:
+      - uses: actions/checkout@v4
+      - name: Retrieve successful release artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.release_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID" > run.json
+          python - <<'PY'
+          import json, os
+          r=json.load(open('run.json'))
+          assert r['conclusion']=='success' and r['status']=='completed'
+          assert r['path']=='.github/workflows/release-images.yml'
+          assert r['repository']['full_name']==os.environ['GITHUB_REPOSITORY']
+          assert r['head_sha']==os.environ['GITHUB_SHA'], 'Dispatch deploy on the tested release revision'
+          PY
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name "flowforge-release-$GITHUB_SHA" --dir release
+          (cd release && sha256sum --check bundle.sha256)
+          python deploy/tests/validate-artifact.py release/images.env "$GITHUB_SHA"
+      - name: Deploy using pinned host key and ephemeral registry credentials
+        env:
+          DEPLOY_HOST: ${{ secrets.FLOWFORGE_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.FLOWFORGE_DEPLOY_USER }}
+          SSH_KEY: ${{ secrets.FLOWFORGE_DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.FLOWFORGE_DEPLOY_KNOWN_HOSTS }}
+          GH_TOKEN: ${{ github.token }}
+          REGISTRY_USER: ${{ github.actor }}
+        run: bash deploy/scripts/remote-deploy.sh release

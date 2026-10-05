@@ -505,7 +505,7 @@ phase report and real Git evidence pass their gates. The separate infrastructure
 report does not complete Phase 1.
 
 FlowForge supports both manual and automation-generated phase prompts. The
-current Phase 9 prompt is `automation`, at `automation/prompts/phase-9.md`.
+current Phase 10 prompt is `automation`, at `automation/prompts/phase-10.md`.
 Phase 1 used manual input, with no prompt file required.
 Automated prompts must have an existing current-phase file.
 `prompt_path` tracks the current phase's source; `next_prompt` tracks an externally
@@ -556,6 +556,23 @@ and its duplicate-key blocker are preserved. See [observability](docs/observabil
 [recorded baseline](docs/benchmarks/phase-9-baseline.md) and [ADR 0010](docs/decisions/0010-observability-cardinality-trace-isolation.md).
 The SLEEP baseline applies only to its recorded machine, concurrency, code and
 workload; it is not a production latency, scalability or reliability SLA.
+
+## Production release infrastructure (Phase 10, cloud acceptance pending)
+
+Independent production Compose builds no server images. A lockfile static React
+image runs behind Caddy; private mode (selected) exposes only loopback8180 through
+SSH. Optional public mode requires HTTPS/Basic Auth. Production PG uses real TLS,
+Redis a generated strong password, internal metrics/dependencies stay private.
+Dispatch-only GHCR/digest release and protected deploy workflows implement locking,
+backup/drain/migrate/health gates and atomic release metadata. Failure defaults
+to safe abort; no automatic schema downgrade or guessed image rollback.
+
+See [deployment/runbook](docs/deployment.md), [bundle](deploy/README.md) and
+[Phase 10 progress](docs/reports/phase-10-report.md). Local validation is separate
+from real cloud acceptance: authorized host/Environment and successful release/
+deploy/cloud smoke evidence remain required. Default2 Workers/C1 reflects Phase9
+benchmark limits. Retained schema4 DB is untouched; main is not merged. Phase10
+is the final numbered roadmap phase; no Phase11 is generated.
 
 ## License
 

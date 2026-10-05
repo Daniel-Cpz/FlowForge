@@ -244,3 +244,13 @@ network and env file. Retained duplicate/schema audit must remain unchanged.
 Never point these scenarios at production or retained volumes. Schema 000008
 adds internal trace context and does not bypass 000005 preflight. See
 [observability](observability.md) and [baseline](benchmarks/phase-9-baseline.md).
+
+## Phase 10 single-host release operations
+
+Production defaults to 2 C1 Workers (explicit scale 1..4), existing lease/retry/
+fencing and a 30 second graceful stop. Deploy backs up and drains app before
+migration, then bounds health gates. Failure retains volumes/old metadata and
+requires operator compatibility/restore decision; never automatic migrate-down.
+Retained development data is untouched. Local production crash/recovery/restore/
+restart evidence is isolated; real cloud acceptance awaits an authorized host.
+See [runbook](deployment.md).

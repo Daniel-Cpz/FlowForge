@@ -11,6 +11,8 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/api ./cmd/api && \
     CGO_ENABLED=0 go build -trimpath -o /out/loadgen ./cmd/loadgen
 
 FROM alpine:3.23 AS runtime
+ARG REVISION=unknown
+LABEL org.opencontainers.image.source="https://github.com/Daniel-Cpz/FlowForge" org.opencontainers.image.revision=$REVISION
 RUN apk add --no-cache ca-certificates && addgroup -S flowforge && adduser -S -G flowforge flowforge
 WORKDIR /app
 COPY --from=build /out/ /app/

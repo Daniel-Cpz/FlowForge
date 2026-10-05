@@ -1,0 +1,61 @@
+name: Release immutable images
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: flowforge-release-${{ github.sha }}
+  cancel-in-progress: false
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+  publish:
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - name: Build and test the exact images before publication
+        env:
+          FLOWFORGE_RELEASE_SHA: ${{ github.sha }}
+        run: python deploy/tests/production-stack.py
+      - name: Publish tested image IDs and deployment bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          mkdir -p release
+          for component in backend gateway; do
+            local_image="flowforge-phase10-$component:$SHA"
+            remote_image="ghcr.io/daniel-cpz/flowforge-$component:$SHA"
+            # Refuse to replace any already-published SHA tag; digest is authoritative.
+            if docker manifest inspect "$remote_image" >/dev/null 2>&1; then
+              echo 'SHA image already exists; use its existing successful release artifact' >&2
+              exit 1
+            fi
+            docker tag "$local_image" "$remote_image"
+            docker push "$remote_image"
+            ref=$(docker image inspect --format '{{index .RepoDigests 0}}' "$remote_image")
+            printf 'FLOWFORGE_%s_IMAGE=%s\n' "${component^^}" "$ref" >> release/images.env
+          done
+          printf 'FLOWFORGE_RELEASE_SHA=%s\n' "$SHA" >> release/images.env
+          cp -R deploy release/bundle
+          mkdir release/bundle/observability
+          cp -R observability/prometheus.yml observability/otel-collector.yml observability/grafana release/bundle/observability/
+          tar -C release -czf release/bundle.tar.gz bundle
+          (cd release && sha256sum bundle.tar.gz > bundle.sha256)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: flowforge-release-${{ github.sha }}
+          path: |
+            release/images.env
+            release/bundle.tar.gz
+            release/bundle.sha256
+          retention-days: 30

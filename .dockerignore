@@ -15,3 +15,6 @@ volumes
 **/node_modules
 **/dist
 **/coverage
+deploy/secrets
+deploy/backups
+*.dump

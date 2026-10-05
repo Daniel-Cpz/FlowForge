@@ -136,3 +136,12 @@ manual; CI tests logic, configuration and cleanup guards only.
 References: [Prometheus Go client](https://pkg.go.dev/github.com/prometheus/client_golang/prometheus),
 [DNS discovery](https://prometheus.io/docs/prometheus/latest/configuration/configuration/#dns_sd_config),
 [OTel Go exporters](https://opentelemetry.io/docs/languages/go/exporters/).
+
+## Phase 10 production profile
+
+Release bundles include optional provisioning: Prometheus 7 day / 1 GiB retention,
+only loopback9090; Grafana Viewer only loopback3000; Collector has no host port.
+Gateway blocks metrics; API/Worker metrics are internal. Use SSH tunnels for
+diagnostics. Disabled profile is not cloud dashboard evidence. Default 2 C1
+Workers reflects benchmark limits. Actual cloud UP-target/dashboard acceptance
+awaits an authorized host. See [deployment](deployment.md).

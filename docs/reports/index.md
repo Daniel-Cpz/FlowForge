@@ -23,3 +23,4 @@ substitute for phase completion.
 - [Phase 7 — Delayed Jobs, capability-aware Claim and recurring schedules](phase-7-report.md)
 - [Phase 8 — Dashboard, WebSocket fanout and REST resync](phase-8-report.md)
 - [Phase 9 — Bounded observability, failure injection and measured local baseline](phase-9-report.md)
+- [Phase 10 — Production infrastructure progress; cloud acceptance pending](phase-10-report.md) (unfinished)

@@ -153,6 +153,9 @@ func Load() (Config, error) {
 	if c.Env == "production" && sslmode == "disable" {
 		return c, fmt.Errorf("PostgreSQL TLS must be enabled in production")
 	}
+	if c.Env == "production" && len(strings.TrimSpace(c.RedisPassword)) < 32 {
+		return c, fmt.Errorf("production Redis password must contain at least 32 characters")
+	}
 	u := url.URL{Scheme: "postgres", User: url.UserPassword(user, password), Host: net.JoinHostPort(host, strconv.Itoa(port)), Path: "/" + db}
 	q := url.Values{"sslmode": {sslmode}, "timezone": {"UTC"}}
 	u.RawQuery = q.Encode()

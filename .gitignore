@@ -28,3 +28,6 @@ Thumbs.db
 .codex/
 .agents/
 node_modules/
+deploy/secrets/
+deploy/backups/
+*.dump

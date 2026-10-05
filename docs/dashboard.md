@@ -110,3 +110,12 @@ Browser E2E NOT RUN; real WS clients plus frontend component/hook tests,
 typecheck/build and HTTP/WS process smoke are the evidence. This is not a benchmark
 or production serving design. Before Phase 10 external exposure, reassess auth,
 TLS and origin policy.
+
+## Phase 10 production serving
+
+Independent gateway image serves production static dist with SPA fallback and
+same-origin REST/WS. Chosen private mode uses browser 127.0.0.1:8180 through SSH;
+optional public mode authenticates static/API/WS at the HTTPS gateway. Application
+users/session/RBAC remain unimplemented. Match exact WS origin and tunnel port;
+Grafana link requires the 3000 tunnel. Local production image/TLS/auth/WS tests
+are separate from cloud/browser E2E evidence. See [deployment](deployment.md).

@@ -2,7 +2,7 @@
 
 Phases 0–9 are implemented: foundation, strict API/persistence, durable dispatch,
 SLEEP execution, multiple workers with bounded concurrency, DB-time lease recovery, budgeted retries/idempotency and priority/timeout/cancellation/DLQ controls.
-Phase 7 adds DB-time delayed Jobs, capability-aware Claim and fixed-interval recurring schedules. Phase 8 adds the React/TypeScript Dashboard, transient WebSocket fanout and REST resync. Phase 9 adds bounded Prometheus/OTLP diagnostics, Grafana provisioning, isolated failure injection and a repeated local benchmark. Phase 10 remains Planned. Authoritative completion status is in
+Phase 7 adds DB-time delayed Jobs, capability-aware Claim and fixed-interval recurring schedules. Phase 8 adds the React/TypeScript Dashboard, transient WebSocket fanout and REST resync. Phase 9 adds bounded Prometheus/OTLP diagnostics, Grafana provisioning, isolated failure injection and a repeated local benchmark. Phase 10 infrastructure is implemented locally; real cloud acceptance is pending. Authoritative completion status is in
 [`automation/state.json`](../automation/state.json). The whole-project
 [`README.md`](../README.md) and each independent report are required on completion.
 See the [protocol](phase-automation.md) and [report template](phase-report-template.md).
@@ -33,8 +33,11 @@ capability routing and priority aging remain planned. Phase 9 supplies metrics,
 durable async trace correlation and repeatable failure/measurement harnesses;
 production alerting, durable trace storage and deployment remain planned.
 
-External Automation consumed the Phase 8 report and prepared Phase 9. After its
-completion, external review and a legitimate next prompt are required before
-Phase 10. Codex does not advance last_processed_phase to 9 or generate Phase 10.
+External Automation consumed Phase 9 and prepared Phase 10. Codex claimed Phase10;
+production infrastructure/local evidence are recorded in its progress report.
+Actual host/GHCR/Actions/cloud acceptance are pending; Phase10 is unfinished.
+Codex preserves last_processed_phase=9 and does not generate Phase11. After this
+final numbered phase, external review and an explicit operator decision are
+required for main merge/versioned release or further work.
 Retained duplicate-key data remains schema 4 pending separately authorized
 operator resolution; isolated schema-8 acceptance is not deployment or data repair.

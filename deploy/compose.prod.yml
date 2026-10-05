@@ -1,0 +1,140 @@
+x-process: &process
+  restart: unless-stopped
+  init: true
+  stop_grace_period: 30s
+  logging:
+    driver: json-file
+    options: {max-size: "10m", max-file: "3"}
+  networks: [private]
+x-app: &app
+  FLOWFORGE_ENV: production
+  FLOWFORGE_HTTP_ADDR: :8080
+  FLOWFORGE_POSTGRES_HOST: postgres
+  FLOWFORGE_POSTGRES_USER: flowforge
+  FLOWFORGE_POSTGRES_DB: flowforge
+  FLOWFORGE_POSTGRES_PASSWORD: ${FLOWFORGE_POSTGRES_PASSWORD:?required}
+  FLOWFORGE_POSTGRES_SSLMODE: require
+  FLOWFORGE_REDIS_ADDR: redis:6379
+  FLOWFORGE_REDIS_PASSWORD: ${FLOWFORGE_REDIS_PASSWORD:?required}
+  FLOWFORGE_WS_ORIGINS: ${FLOWFORGE_WS_ORIGINS:?required}
+  FLOWFORGE_WORKER_CONCURRENCY: ${FLOWFORGE_WORKER_CONCURRENCY:-1}
+  FLOWFORGE_WORKER_CAPABILITIES: sleep
+  FLOWFORGE_METRICS_ENABLED: "true"
+  FLOWFORGE_METRICS_ADDR: :9091
+  FLOWFORGE_OTEL_ENABLED: ${FLOWFORGE_OTEL_ENABLED:-false}
+  FLOWFORGE_OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+  FLOWFORGE_LOG_LEVEL: INFO
+services:
+  postgres:
+    <<: *process
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: flowforge
+      POSTGRES_DB: flowforge
+      POSTGRES_PASSWORD: ${FLOWFORGE_POSTGRES_PASSWORD:?required}
+    command: [postgres, -c, ssl=on, -c, ssl_cert_file=/tls/server.crt, -c, ssl_key_file=/tls/server.key]
+    volumes:
+      - pg_data:/var/lib/postgresql
+      - ${FLOWFORGE_HOME:?required}/secrets/postgres:/tls:ro
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U flowforge -d flowforge']
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  redis:
+    <<: *process
+    image: redis:8.2-alpine
+    environment:
+      REDIS_PASSWORD: ${FLOWFORGE_REDIS_PASSWORD:?required}
+    command: [sh, -c, 'exec redis-server --appendonly yes --appendfsync everysec --maxmemory-policy noeviction --requirepass "$$REDIS_PASSWORD"']
+    volumes: [redis_data:/data]
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep -q PONG']
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  migrate:
+    <<: *process
+    restart: "no"
+    image: ${FLOWFORGE_BACKEND_IMAGE:?required}
+    command: [/app/migrate, up]
+    environment: *app
+    depends_on:
+      postgres: {condition: service_healthy}
+  api:
+    <<: *process
+    image: ${FLOWFORGE_BACKEND_IMAGE:?required}
+    environment: *app
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:8080/ready']
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  worker:
+    <<: *process
+    image: ${FLOWFORGE_BACKEND_IMAGE:?required}
+    command: [/app/worker]
+    environment: *app
+    depends_on:
+      api: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:9091/metrics']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  gateway:
+    <<: *process
+    image: ${FLOWFORGE_GATEWAY_IMAGE:?required}
+    environment:
+      FLOWFORGE_PUBLIC_HOST: ${FLOWFORGE_PUBLIC_HOST:-}
+      FLOWFORGE_BASIC_USER: ${FLOWFORGE_BASIC_USER:-}
+      FLOWFORGE_BASIC_HASH: ${FLOWFORGE_BASIC_HASH:-}
+    volumes:
+      - ./gateway/Caddyfile.${FLOWFORGE_MODE:?required}:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:8080/_gateway/health']
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  prometheus:
+    <<: *process
+    profiles: [observability]
+    image: prom/prometheus:v3.5.0
+    command: [--config.file=/etc/prometheus/prometheus.yml, --storage.tsdb.retention.time=7d, --storage.tsdb.retention.size=1GB]
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prom_data:/prometheus
+  grafana:
+    <<: *process
+    profiles: [observability]
+    image: grafana/grafana:12.1.1
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+  otel-collector:
+    <<: *process
+    profiles: [observability]
+    image: otel/opentelemetry-collector:0.133.0
+    command: [--config=/etc/otelcol/config.yaml]
+    volumes: [./observability/otel-collector.yml:/etc/otelcol/config.yaml:ro]
+networks:
+  private: {}
+volumes:
+  pg_data: {}
+  redis_data: {}
+  caddy_data: {}
+  caddy_config: {}
+  prom_data: {}
+  grafana_data: {}

@@ -1,5 +1,8 @@
 name: CI
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_call:
 permissions:
   contents: read
 
@@ -59,3 +62,19 @@ jobs:
       - name: Harness safety
         shell: pwsh
         run: ./scripts/test-phase9-harness.ps1
+      - name: Production deployment state machine
+        run: |
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 -shellcheck= -pyflakes= .github/workflows/ci.yml .github/workflows/release-images.yml .github/workflows/deploy.yml
+          for file in deploy/scripts/*.sh deploy/tests/*.sh; do bash -n "$file"; done
+          bash deploy/tests/state-machine.sh
+          bash deploy/tests/remote-safety.sh
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - name: Production config / workflow safety
+        run: |
+          python -m pip install PyYAML==6.0.2
+          python deploy/tests/config-safety.py
+      - name: Isolated production image / TLS / gateway / restore smoke
+        env:
+          FLOWFORGE_RELEASE_SHA: ${{ github.sha }}
+        run: python deploy/tests/production-stack.py

@@ -1,0 +1,34 @@
+{
+	admin off
+}
+# Unpublished health listener. Public override publishes only 80/443.
+:8080 {
+	handle /_gateway/health {
+		respond "ok" 200
+	}
+	handle {
+		respond "not found" 404
+	}
+}
+{$FLOWFORGE_PUBLIC_HOST} {
+	# route preserves authentication before every public handler, including WS.
+	route {
+		basic_auth {
+			{$FLOWFORGE_BASIC_USER} {$FLOWFORGE_BASIC_HASH}
+		}
+		handle /metrics* {
+			respond "not found" 404
+		}
+		handle /api/* {
+			reverse_proxy api:8080
+		}
+		handle /ready {
+			reverse_proxy api:8080
+		}
+		handle {
+			root * /srv
+			try_files {path} /index.html
+			file_server
+		}
+	}
+}
