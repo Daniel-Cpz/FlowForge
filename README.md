@@ -25,7 +25,7 @@ POST -> Job service -> PostgreSQL transaction: Job + dispatch intent
                                |
                    Worker process dispatcher -> Redis Streams
                                |
-                   single worker -> DB atomic claim + attempt
+                   N worker processes x C slots -> DB atomic claim + attempt
                                |
                    SLEEP -> DB terminal Job + attempt -> Redis ACK
 ```
@@ -137,8 +137,13 @@ invalid SLEEP payloads receive 201 then become FAILED with a static result error
 semantics apply before execution. Success stores
 `{"duration_ms":250,"outcome":"slept"}`.
 
-The worker processes **one Job at a time**, with one dispatcher goroutine in the
-same process. Job + outbox creation is atomic. Publishing and marking outbox
+Each worker process has **C fixed slots**, default 1, and one dispatcher. Set
+`FLOWFORGE_WORKER_CONCURRENCY` to an unsigned decimal integer in **1..32**.
+Each free slot receives one delivery, with no unbounded prefetch. Instances use
+one UUID each and consumers `<worker_id>:<slot>` in a shared stream/group.
+N processes hold at most N*C deliveries and claimed executions. Worker connection
+limits are C+2 PostgreSQL and C+4 Redis sockets; budget other clients too.
+Job + outbox creation is atomic. Publishing and marking outbox
 publication are separate operations, so duplicate messages are expected.
 The dispatcher reads at most 100 intents each second; it also republishes
 still-QUEUED work after 30 seconds. PostgreSQL therefore reconstructs delivery
@@ -159,7 +164,14 @@ message pending, and stops the worker; it does not claim success. Graceful
 SIGINT/SIGTERM interrupts SLEEP and attempts bounded persistence of FAILED with
 `execution_cancelled`, then ACK; unavailable storage leaves work unresolved.
 This is at-least-once delivery with guarded claims, **not exactly-once execution**.
-See [worker operations](docs/worker-operations.md) and [ADR 0003](docs/decisions/0003-durable-dispatch-and-single-worker.md).
+See [worker operations](docs/worker-operations.md), [ADR 0003](docs/decisions/0003-durable-dispatch-and-single-worker.md)
+and [ADR 0004](docs/decisions/0004-fixed-worker-pool.md).
+
+The tested two-process command is
+`docker compose up --build -d --scale worker=2 migrate api worker`.
+Set concurrency to 2 in `.env` to match the isolated acceptance smoke.
+Run `./scripts/phase3-smoke.ps1 -Concurrency 2` in PowerShell for that controlled
+smoke; it temporarily restarts development API/workers and restores one worker.
 
 List accepts only `limit` (default 20, range 1–100) and optional `cursor`.
 Unknown/repeated query parameters, invalid limits and malformed query encoding
@@ -238,7 +250,7 @@ In Docker, migrations can also run with
 before rolling back schema. Three `down` calls roll back outbox, attempts and jobs.
 Migration 000003 backfills dispatch intent for existing QUEUED Jobs. Starting the
 Phase 2 worker therefore processes existing queued work; unsupported legacy
-types become FAILED. Do not start multiple worker processes in this phase.
+types become FAILED. Phase 3 supports multiple workers with per-process concurrency.
 Migrations use version tracking, an advisory transaction lock, and one atomic
 transaction per invocation. Applied SQL is immutable; use new versions for
 future changes. Changing passwords in `.env` does not change an existing
@@ -272,7 +284,10 @@ outbox history have no automatic retention/cleanup yet. All ports bind to loopba
 - Atomic Job/outbox transaction and existing-QUEUED migration backfill
 - Bounded dispatcher and database-driven queued-job republication
 - Redis Streams consumer group, minimal messages and explicit ACK boundary
-- Single serial worker, PostgreSQL atomic claim and transactional attempt records
+- Fixed worker slots (C=1..32), multiple processes and process UUID / consumer identities
+- PostgreSQL atomic claim and transactional owner/attempt records
+- Unified fail-fast supervision, shared cleanup window and joined shutdown
+- Barrier/race tests and real two-process C=2 smoke with survivor continuation
 - Bounded context-aware SLEEP, deterministic failures and shutdown persistence
 - Real PostgreSQL/Redis E2E, duplicate/failure-window and isolated migration tests
 
@@ -282,7 +297,7 @@ None. The tested SLEEP demonstration is implemented; production recovery is plan
 
 ### Planned
 
-Multiple workers, bounded concurrency, scheduling, heartbeat,
+Scheduling, heartbeat,
 lease renewal, crash recovery, retry/backoff/jitter, submission idempotency,
 priority, timeout/user-cancellation execution policies, DLQ management,
 dashboard, metrics/tracing, failure injection, benchmarking and cloud deployment.
@@ -291,11 +306,13 @@ dashboard, metrics/tracing, failure injection, benchmarking and cloud deployment
 
 Phase 1 delivers **Job Persistence + API Correctness**. Phase 2 implements
 **Redis Queue + Single Worker Execution** with a durable database outbox.
-The next recommended phase is **Phase 3 — Multiple Workers + Bounded Concurrency**;
-it is not started or implemented here.
+Phase 3 implements **Multiple Workers + Bounded Concurrency**.
+The next recommendation is **Phase 4 — Heartbeat + Lease + Crash Recovery**;
+it remains Planned, and no next prompt has been generated by Codex.
 See the [Phase 0–10 roadmap](docs/development-roadmap.md) and authoritative phase state.
 The [Phase 1 report](docs/reports/phase-1-report.md) records its validation and Git checkpoint.
 The [Phase 2 report](docs/reports/phase-2-report.md) records execution/durability evidence.
+The [Phase 3 report](docs/reports/phase-3-report.md) records concurrency/process evidence.
 This repository does not claim exactly-once execution. Future delivery is planned
 as at-least-once; business side effects will need their own idempotency safeguards.
 
@@ -321,8 +338,9 @@ phase report and real Git evidence pass their gates. The separate infrastructure
 report does not complete Phase 1.
 
 FlowForge supports both manual and automation-generated phase prompts. The
-current Phase 1 prompt is `manual`, with `prompt_path: null`; no manual prompt
-file is required. Automated prompts must have an existing current-phase file.
+current Phase 3 prompt is `automation`, at `automation/prompts/phase-3.md`.
+Phase 1 used manual input, with no prompt file required.
+Automated prompts must have an existing current-phase file.
 `prompt_path` tracks the current phase's source; `next_prompt` tracks an externally
 prepared next phase. Both sources use the same completion gates. Explicit user
 instructions may supersede an unstarted automated prompt; Automation must not

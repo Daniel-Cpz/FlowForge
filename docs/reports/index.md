@@ -11,6 +11,7 @@ never infer the phase from report ordering.
 
 - [Phase 1 — API and persistence correctness](phase-1-report.md)
 - [Phase 2 — Durable dispatch and single-worker execution](phase-2-report.md)
+- [Phase 3 — Multiple workers and bounded concurrency](phase-3-report.md)
 
 Each numbered report contains that Phase's own evidence. Read state for its published
 completion/Git checkpoint; the infrastructure report is independent and cannot

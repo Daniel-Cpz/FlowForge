@@ -1,6 +1,6 @@
 # Architecture
 
-Status: Phase 0 foundation, Phase 1 API/persistence and Phase 2 single-worker execution implemented.
+Status: Phases 0–3 implemented, including multiple workers and bounded concurrency.
 
 ## Boundaries
 
@@ -20,7 +20,7 @@ alone would not establish durable execution ownership. No update HTTP API exists
 ## Components and source of truth
 
 - API: bounded HTTP input, service validation, persistence, health/readiness.
-- Worker process: one dispatcher goroutine plus one serial executor; no pool.
+- Worker process: one dispatcher and C fixed consumer/executor slots (1..32).
 - PostgreSQL: sole durable truth for jobs, attempts and dispatch intent.
 - Redis: Streams delivery with consumer group and explicit ACK, never payload authority.
 - Migrations: separate command; version table + advisory transaction lock ensure
@@ -48,9 +48,12 @@ addressed creation request from atomically committing Job and dispatch intent.
 
 On SIGINT/SIGTERM, API stops accepting connections and allows ten seconds for
 in-flight requests, then force-closes remaining connections if necessary.
-Worker cancels its context-aware SLEEP, tries to persist FAILED with
-`execution_cancelled` and ACK within a five-second cleanup context, stops the
-dispatcher and closes clients. Compose grants fifteen seconds. Redis receive
+Worker logs draining, cancels all slots and its dispatcher, and concurrently
+tries FAILED/execution_cancelled persistence and ACK within a shared five-second
+cleanup cancellation window. Repository rollback retains its separate bounded
+five-second budget. All goroutines join before clients close. A fatal slot error
+or panic drains the pool and exits with a safe error; business failures continue.
+Panicking claimed work remains RUNNING/pending. Compose grants fifteen seconds. Redis receive
 errors wait 250 ms between attempts; dispatch cycles wait one second even after
 failure or a full batch. Restart policies and production orchestration remain planned.
 
@@ -59,7 +62,7 @@ loses the response, resubmitting may create another job. There is no submission
 idempotency guarantee. PostgreSQL constraints validate values, not the full
 state transition graph; direct SQL is not a supported state transition API.
 
-## Delivery semantics — Phase 2
+## Delivery semantics — Phases 2–3
 
 Delivery is **at-least-once**, backed by PostgreSQL dispatch intent. Create
 commits Job + outbox in one transaction. The dispatcher queries at most 100 rows
@@ -92,7 +95,8 @@ transaction cannot make an arbitrary external API exactly-once.
 Planned safeguards include scoped submission idempotency and side-effect-specific deduplication.
 Scope and retention are not decided, so idempotency_key has no global permanent
 unique constraint. See [ADR 0003](decisions/0003-durable-dispatch-and-single-worker.md)
-for the current database/queue handoff and future extension boundaries.
+for the database/queue handoff and [ADR 0004](decisions/0004-fixed-worker-pool.md)
+for fixed slots, connection budgets, consumer identity and supervision.
 
 ## Lease and recovery — Planned
 
@@ -118,7 +122,10 @@ retry after timeout requires a later explicit policy and state graph revision.
 
 Local development only: no authentication, TLS termination, rate limiting,
 multi-tenancy, production secret manager, metrics, tracing or benchmarks.
-Pool maximum is ten connections per process. PostgreSQL statement timeout is
+API connection limits are ten each. Worker limits are C+2 PostgreSQL and C+4
+Redis, explicitly capped so blocking reads leave ACK/publication capacity.
+Multiply those budgets by process count; this is local execution backpressure,
+not API admission control or a global queue limit. PostgreSQL statement timeout is
 five seconds. List uses bounded keyset pagination; it does not hold a snapshot
 transaction across HTTP requests.
 Production environment config requires PostgreSQL TLS, but that check alone does

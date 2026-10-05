@@ -11,14 +11,15 @@ import (
 )
 
 type Config struct {
-	Env           string
-	HTTPAddr      string
-	PostgresURL   string
-	RedisAddr     string
-	RedisPassword string
-	RedisDB       int
-	RedisStream   string
-	LogLevel      slog.Level
+	Env               string
+	HTTPAddr          string
+	PostgresURL       string
+	RedisAddr         string
+	RedisPassword     string
+	RedisDB           int
+	RedisStream       string
+	LogLevel          slog.Level
+	WorkerConcurrency int
 }
 
 func value(key, fallback string) string {
@@ -32,6 +33,12 @@ func Load() (Config, error) {
 	c := Config{Env: value("FLOWFORGE_ENV", "development"), HTTPAddr: value("FLOWFORGE_HTTP_ADDR", ":8080"),
 		RedisAddr: value("FLOWFORGE_REDIS_ADDR", "localhost:6379"), RedisPassword: os.Getenv("FLOWFORGE_REDIS_PASSWORD"),
 		RedisStream: value("FLOWFORGE_REDIS_STREAM", "flowforge:jobs:v1")}
+	concurrency := value("FLOWFORGE_WORKER_CONCURRENCY", "1")
+	var err error
+	c.WorkerConcurrency, err = strconv.Atoi(concurrency)
+	if err != nil || c.WorkerConcurrency < 1 || c.WorkerConcurrency > 32 || strings.IndexFunc(concurrency, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
+		return c, fmt.Errorf("FLOWFORGE_WORKER_CONCURRENCY must be an integer in 1..32")
+	}
 	if strings.TrimSpace(c.RedisStream) == "" || len(c.RedisStream) > 256 || strings.IndexFunc(c.RedisStream, func(r rune) bool { return r < 32 || r == 127 }) >= 0 {
 		return c, fmt.Errorf("invalid FLOWFORGE_REDIS_STREAM")
 	}

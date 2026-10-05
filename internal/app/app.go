@@ -26,12 +26,16 @@ func Run(ctx context.Context, process string) error {
 	slog.SetDefault(logger)
 	startup, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	pool, err := postgres.Open(startup, cfg.PostgresURL)
+	pgConnections, redisConnections := 10, 10
+	if process == "worker" {
+		pgConnections, redisConnections = cfg.WorkerConcurrency+2, cfg.WorkerConcurrency+4
+	}
+	pool, err := postgres.OpenWithMaxConns(startup, cfg.PostgresURL, int32(pgConnections))
 	if err != nil {
 		return errors.New("PostgreSQL startup connection failed")
 	}
 	defer pool.Close()
-	redis := redisinfra.NewClient(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB)
+	redis := redisinfra.NewClientWithPoolSize(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB, redisConnections)
 	defer func() {
 		if err := redis.Close(); err != nil {
 			logger.Warn("Redis close failed", "event", "redis_close_failed")
@@ -41,16 +45,11 @@ func Run(ctx context.Context, process string) error {
 	if process == "worker" {
 		repo := postgres.NewJobRepository(pool)
 		queue := redisinfra.NewQueue(redis, cfg.RedisStream, redisinfra.Group)
-		workerCtx, stop := context.WithCancel(ctx)
-		defer stop()
-		dispatchDone := make(chan struct{})
-		go func() { defer close(dispatchDone); dispatch.New(repo, queue, logger).Run(workerCtx) }()
-		logger.Info("Single worker started", "event", "worker_started")
-		err := execution.New(repo, queue, execution.Sleep{}, logger).Run(workerCtx)
-		stop()
-		<-dispatchDone
-		logger.Info("Worker stopped", "event", "worker_stopped")
-		return err
+		worker, err := execution.NewWithConcurrency(repo, queue, execution.Sleep{}, logger, cfg.WorkerConcurrency)
+		if err != nil {
+			return err
+		}
+		return worker.RunWithDispatcher(ctx, dispatch.New(repo, queue, logger).Run)
 	}
 	repo := postgres.NewJobRepository(pool)
 	router := httptransport.NewRouter(jobservice.New(repo), logger, pool.Ping, func(ctx context.Context) error { return redis.Ping(ctx).Err() },

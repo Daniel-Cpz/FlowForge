@@ -7,11 +7,15 @@ import (
 )
 
 func Open(ctx context.Context, connectionString string) (*pgxpool.Pool, error) {
+	return OpenWithMaxConns(ctx, connectionString, 10)
+}
+
+func OpenWithMaxConns(ctx context.Context, connectionString string, maxConns int32) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(connectionString)
 	if err != nil {
 		return nil, err
 	}
-	cfg.MaxConns = 10
+	cfg.MaxConns = maxConns
 	cfg.ConnConfig.ConnectTimeout = 5 * time.Second
 	cfg.ConnConfig.RuntimeParams["timezone"] = "UTC"
 	cfg.ConnConfig.RuntimeParams["statement_timeout"] = "5000"

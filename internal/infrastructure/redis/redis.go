@@ -20,10 +20,15 @@ func (clientLogger) Printf(ctx context.Context, _ string, _ ...interface{}) {
 
 // NewClient allows the worker to start its bounded retry loops during an outage.
 func NewClient(addr, password string, db int) *redis.Client {
+	return NewClientWithPoolSize(addr, password, db, 10)
+}
+
+// The worker reserves C blocking reads plus four nonblocking operation sockets.
+func NewClientWithPoolSize(addr, password string, db, size int) *redis.Client {
 	configureLogger.Do(func() { redis.SetLogger(clientLogger{}) })
 	return redis.NewClient(&redis.Options{Addr: addr, Password: password, DB: db,
 		DialTimeout: 3 * time.Second, ReadTimeout: 3 * time.Second, WriteTimeout: 3 * time.Second,
-		ContextTimeoutEnabled: true, MaxRetries: -1})
+		ContextTimeoutEnabled: true, MaxRetries: -1, PoolSize: size, MaxActiveConns: size, PoolTimeout: 3 * time.Second})
 }
 
 func Open(ctx context.Context, addr, password string, db int) (*redis.Client, error) {

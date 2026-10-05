@@ -152,7 +152,7 @@ tools image can run focused checks without application services:
 docker run --rm --mount "type=bind,source=$($PWD.Path),target=/src,readonly" -w /src -e GOTOOLCHAIN=local -e GOFLAGS=-mod=readonly flowforge-tools sh -c 'git config --global --add safe.directory /src && go test -count=1 ./scripts/validate-phase-state && go run ./scripts/validate-phase-state'
 ```
 
-Phase 1's source was manual with null prompt_path. Phase 2 uses automation and
-automation/prompts/phase-2.md. Its independent report and machine-readable state
+Phase 1's source was manual with null prompt_path. Phases 2 and 3 use automation
+with their corresponding automation/prompts/phase-N.md. Each report and machine-readable state
 certify completion only after all gates pass.
 The infrastructure report alone does not certify a numbered phase or Phase 0.

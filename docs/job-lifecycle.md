@@ -36,7 +36,9 @@ updates it with the Job's terminal status, finish time and result in one
 transaction. Duplicate rejection before claim creates no attempt. Failure codes
 are recorded in result JSON; the reserved attempt.error column remains null.
 There is no retry loop. Worker IDs have no foreign key because
-worker registration/persistence has not been designed.
+worker registration/persistence has not been designed. Phase 3 keeps one UUID
+per process across all C slots; restart generates a new UUID. A slot/Redis
+consumer is not a durable worker registration.
 
 ## Database constraints
 
@@ -70,6 +72,13 @@ duplicates are ACKed without execution. Graceful process cancellation writes
 FAILED/execution_cancelled using bounded cleanup before ACK. A finalize failure
 rolls back both records, leaves RUNNING + pending, and stops the worker. A failed
 ACK after terminal commit leaves a terminal Job and possible pending message.
+
+Phase 3 preserves these boundaries across processes. A fatal slot error stops
+all peers and the process dispatcher; business failures do not stop the pool.
+Graceful cleanup runs concurrently against a shared deadline. In-flight Receive
+and Claim can race with cancellation: unclaimed deliveries remain unresolved,
+and a successful late claim attempts FAILED persistence. Executor panic leaves
+the winning Job RUNNING/pending and safely stops the process.
 
 Abrupt post-claim crash or ambiguous claim commit may leave RUNNING indefinitely.
 No heartbeat, lease renewal, stale-consumer reclaim, fencing or recovery exists.

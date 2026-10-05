@@ -1,12 +1,11 @@
 # Development roadmap
 
-Phase 0 supplies the foundation; Phase 1 adds strict API and persistence contracts.
-Phase 2 adds durable dispatch and single-worker SLEEP execution; Phase 3 onward
-remains Planned. Authoritative completion status is in
+Phases 0–3 are implemented: foundation, strict API/persistence, durable dispatch
+and SLEEP execution, then multiple workers with bounded per-process concurrency.
+Phase 4 onward remains Planned. Authoritative completion status is in
 [`automation/state.json`](../automation/state.json). The whole-project
-[`README.md`](../README.md) and each independent `docs/reports/phase-N-report.md`
-are both required on phase completion. See the
-[protocol](phase-automation.md) and [report template](phase-report-template.md).
+[`README.md`](../README.md) and each independent report are required on completion.
+See the [protocol](phase-automation.md) and [report template](phase-report-template.md).
 
 | Phase | Scope |
 |---|---|
@@ -22,19 +21,15 @@ are both required on phase completion. See the
 | 9 | Prometheus + Grafana + tracing + failure injection + benchmarks |
 | 10 | Cloud deployment + CI/CD |
 
-## Next recommendation: Phase 3 — Multiple Workers + Bounded Concurrency
+## Next recommendation: Phase 4 — Heartbeat + Lease + Crash Recovery
 
-Phase 1 delivers exact Create envelope names, duplicate rejection, null/default
-semantics, JSONB regressions, canonical persistence readback, deterministic cursor
-pagination and HTTP/database failure coverage. Transaction boundaries are recorded
-in ADR 0002. Prompt-source tracking supports manual and automated phase inputs.
+Phase 3 preserves PostgreSQL conditional claim/attempt and owner/attempt finalization,
+adds C fixed slots per process, shared stream/group process identities, multiple
+bounded dispatchers, fail-fast supervision and concurrent shutdown. Barrier/race
+and isolated PostgreSQL/Redis tests plus two real processes validate correctness;
+no scaling throughput claim is made.
 
-Phase 2 uses a transactional PostgreSQL outbox, bounded dispatcher, Redis Streams
-and one serial worker. CAS claim and owner/attempt finalization provide a basis
-for Phase 3, but no worker pool or multi-worker operation is implemented here.
-Phase 4 must explicitly solve post-claim RUNNING crashes and stale ownership;
-QUEUED notification republication does not provide that recovery.
-
-Phase 3 is a recommendation only. Codex has not generated its prompt or started
-it; external review and state publication are required before automatic handoff.
-Measure behavior before making performance claims.
+Phase 4 must explicitly solve post-claim RUNNING crashes, liveness, lease policy
+and stale ownership. QUEUED notification republication does not provide RUNNING
+recovery. This is a recommendation only: Codex has not generated or started a
+Phase 4 prompt. External review and state publication are required for handoff.
