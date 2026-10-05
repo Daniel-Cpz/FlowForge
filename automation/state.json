@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
   "project": "FlowForge",
-  "current_phase": 4,
-  "status": "completed",
-  "report": "docs/reports/phase-4-report.md",
-  "next_prompt": "automation/prompts/phase-5.md",
+  "current_phase": 5,
+  "status": "in_progress",
+  "report": null,
+  "next_prompt": null,
   "last_processed_phase": 4,
   "branch": "codex/phase1-api-correctness",
-  "commit": "40f1250ac64f12bcb51e799a8cbdce8cc45d6f00",
-  "tag": "phase4-lease-recovery",
-  "updated_at": "2026-10-05T04:48:29Z",
+  "commit": null,
+  "tag": null,
+  "updated_at": "2026-10-05T05:19:23Z",
   "prompt_source": "automation",
-  "prompt_path": "automation/prompts/phase-4.md"
+  "prompt_path": "automation/prompts/phase-5.md"
 }
