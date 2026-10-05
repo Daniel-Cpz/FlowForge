@@ -173,6 +173,11 @@ Go 1.26.8, PostgreSQL 18 and Redis 8.2; metrics enabled, tracing/scrapers disabl
 | 8 | 140.39 | 95.99–219.78 | 3.542 | 3.568 |
 | 16 | 37.98 | 16.11–81.59 | 22.236 | 22.263 |
 
+In this recorded workload, the 8-worker configuration achieved the highest mean
+throughput, while 16-worker runs showed substantial degradation and variance;
+without causal profiling, no bottleneck attribution or linear scalability claim
+is made.
+
 Values are copied from the recorded aggregates: arithmetic means of per-run
 throughput and per-run P95s, **not pooled-job percentiles**. All 6,000 measured
 Jobs succeeded with zero submit/terminal/poll errors; every repetition is retained.
@@ -294,8 +299,8 @@ cannot change durable outcomes. The Collector debug exporter is not durable trac
 - Single-host reference topology; no HA, autoscaling or latency/recovery SLA.
 - **SLEEP is the only executable demo Job type**; other types fail permanently.
 - No application users, sessions or RBAC. Keep the development API internal.
-- No real cloud/public ACME validation. **No authorized VPS/EC2 deployment target
-  is currently available.** Local HTTPS evidence uses a disposable CA.
+- No real cloud/public ACME validation. **Real VPS/EC2 deployment is outside the
+  validated v1.0.0 scope.** Local HTTPS evidence uses a disposable CA.
 - Browser E2E, off-host disaster recovery and durable trace storage are not validated.
 - PostgreSQL `sslmode=require` encrypts without certificate identity verification;
   Redis has authentication without TLS on the private container network.
