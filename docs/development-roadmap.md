@@ -29,7 +29,8 @@ PG transactions create a unique ordinary Job/intent and advance next_run_at;
 missed middle intervals are skipped. Schedule cancel leaves existing Jobs alone.
 Phase 8 exposes Overview, Jobs/detail/Attempts, Workers, Schedules and DLQ through
 REST, with transient WS hints and reconnect/30s repair. Cron/edit/pause/resume,
-capability routing and priority aging remain planned. Phase 9 supplies metrics,
+capability-specific streams/routing services and priority aging remain planned;
+capability-aware PostgreSQL Claim is implemented. Phase 9 supplies metrics,
 durable async trace correlation and repeatable failure/measurement harnesses;
 production alerting and durable trace storage remain planned. Deployment tooling
 is implemented/config validated, not cloud-deployed or publication-validated.

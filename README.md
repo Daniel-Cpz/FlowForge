@@ -1,626 +1,338 @@
 # FlowForge
 
 Distributed Job Processing Platform built with Go, PostgreSQL and Redis.
+It explores reliable asynchronous execution across multiple workers under
+crashes, retries, duplicate delivery and changing load, with durable ownership
+and failure tests that make the recovery model inspectable.
 
-Lease-based execution, at-least-once delivery, Worker crash recovery, retry with
-exponential backoff/jitter, DLQ, priority/capability-aware scheduling, scheduled
-Jobs, WebSocket Dashboard, Prometheus/Grafana, Docker, CI and failure testing.
-Production-like container acceptance is validated locally and in GitHub CI;
-real cloud deployment is optional. Phase 10 is completed; **v1.0.0 Released**;
-see [scope decision](docs/decisions/0012-v1-local-production-acceptance.md).
+**[v1.0.0 Released](https://github.com/Daniel-Cpz/FlowForge/releases/tag/v1.0.0)** |
+[Release review](docs/reports/v1.0.0-release-review.md) |
+[Release report](docs/reports/v1.0.0-release.md) |
+[Architecture](#architecture) | [Benchmarks](#measured-baseline) |
+[Documentation](#documentation)
 
-## Overview
+```text
+Submit → Persist → Notify → Schedule → Execute → Recover / Retry → Complete / DLQ
+```
 
-FlowForge is a Go backend project exploring reliable asynchronous job processing.
-The platform persists jobs and executes a bounded SLEEP demonstration asynchronously.
-PostgreSQL is the durable source of truth. API and worker are separate processes
-sharing a small modular codebase.
+## Project Status
 
-## Why FlowForge
+**Released · Maintenance / Portfolio.** The production-like Docker topology is
+validated locally and in GitHub CI. Real VPS/EC2 deployment has not been performed
+and is optional under the [release scope decision](docs/decisions/0012-v1-local-production-acceptance.md).
+The repository remains private; links require repository access.
 
-The engineering problem is coordinating work despite crashes, retries, duplicate
-delivery and changing load. Those guarantees need explicit state transitions,
-durable records and testable failure handling before adding scheduling features.
-No throughput or recovery-time claim is made. Delivery is at-least-once;
-execution authority and crash recovery are guarded by PostgreSQL leases.
+## Why FlowForge?
+
+A worker can disappear after starting work, delivery can repeat, and the database
+and queue cannot commit together. FlowForge addresses these cases with explicit
+Job transitions, preserved Attempt history, durable dispatch intents and leases.
+The central question is when a worker has authority to execute and persist a
+result, and how another worker safely takes over after that authority expires.
+
+## Highlights
+
+| Area | Engineering capabilities |
+|---|---|
+| Reliable execution | PostgreSQL Job state machine and preserved Attempt history |
+| Reliable execution | Multiple worker processes, fixed execution slots and heartbeats |
+| Reliable execution | DB-time leases, stale-owner fencing and crash recovery |
+| Delivery and failure | Durable dispatch intent and at-least-once execution |
+| Delivery and failure | Submission idempotency with canonical replay/conflict checks |
+| Delivery and failure | Budgeted retries, exponential backoff/equal jitter and DLQ redrive |
+| Delivery and failure | Attempt deadlines, cooperative cancellation and bounded shutdown |
+| Scheduling | Non-preemptive priority, delayed eligibility and capability-aware Claim |
+| Scheduling | Fixed-interval templates with atomic occurrence materialization |
+| Operations | REST/WebSocket Dashboard, bounded telemetry and repeatable failure tests |
 
 ## Architecture
 
-```text
-POST -> Job service -> PostgreSQL: keyed create/replay/conflict + intent
-                               |
-                   Worker process dispatcher -> Redis Streams
-                               |
-                   N worker processes x C slots -> DB claim + attempt + lease
-                               |
-                   SLEEP -> DB outcome + attempt + retry schedule/terminal -> Redis ACK
-                               |
-                   Expired lease -> budgeted RETRYING/DEAD_LETTER -> due queue + intent
+```mermaid
+flowchart TD
+    Client[Client / React Dashboard] -->|REST / WebSocket| API[Go API]
+    API -->|Job + dispatch intent in one transaction| PG[(PostgreSQL)]
+    PG --- State[Jobs / Attempts / Worker registry / leases / schedules / outbox]
+    subgraph Workers[Multiple Go worker processes]
+        Dispatch[Embedded dispatcher]
+        Maintenance[Embedded maintenance and heartbeat loops]
+        Slots[Fixed slots: Claim / renew / execute / fenced Finalize]
+    end
+    Dispatch -->|Read durable dispatch intents| PG
+    Dispatch -->|Publish version + Job ID| Stream[(Redis Streams)]
+    Stream -->|Delivery notification| Slots
+    Slots -->|Atomic Claim and durable outcomes| PG
+    Maintenance -->|Recover leases / promote retries / materialize schedules| PG
+    API -->|Post-commit UI hints| Fanout[(Redis Pub/Sub)]
+    Slots -->|Post-commit UI hints| Fanout
+    Maintenance -->|Post-commit UI hints| Fanout
+    Fanout -->|Transient fanout| API
 ```
 
-The composition root wires infrastructure into the service. Domain and service
-do not import database or transport packages. PostgreSQL is authoritative;
-Redis messages contain only a protocol version and Job ID.
-See [architecture](docs/architecture.md), [lifecycle](docs/job-lifecycle.md) and
-[decisions](docs/decisions/README.md).
+**PostgreSQL is authoritative.** Job/Attempt state, ownership, eligibility and
+dispatch intent survive independently of Redis. Redis Streams carries minimal
+delivery notifications; a separate Pub/Sub channel carries lossy UI hints.
+Every worker process embeds its dispatcher and maintenance loops alongside
+**C fixed slots** (default 1, range 1–32); N processes bound execution to N × C.
 
-## Tech Stack
+The composition root wires transport and persistence into services. Domain and
+service packages do not import database or transport packages. See
+[architecture](docs/architecture.md) and [worker operations](docs/worker-operations.md).
 
-- Go 1.26+, standard `net/http`, `log/slog`, `testing`
-- PostgreSQL 18, pgx v5; Redis 8.2, go-redis v9
-- Docker / Docker Compose; GitHub Actions CI
-- UUID identifiers; JSONB payloads; UTC / TIMESTAMPTZ timestamps
+## Worker Crash Recovery
 
-## Getting Started
+```mermaid
+sequenceDiagram
+    participant A as Worker A
+    participant DB as PostgreSQL
+    participant R as Healthy worker maintenance
+    participant Q as Dispatcher / Redis
+    participant B as Worker B
+    A->>DB: Atomic Claim: RUNNING + Attempt + owner + lease
+    Note over A: Hard crash; heartbeat and renewal stop
+    Note over DB: Lease expires at database time
+    R->>DB: Close old Attempt: FAILED / lease_expired
+    alt No cancellation and Attempt budget remains
+        R->>DB: Persist RETRYING with retry_at; clear ownership
+        R->>DB: When due: QUEUED + dispatch intent atomically
+        Q->>DB: Read committed dispatch intent
+        Q->>B: Redis delivery notification
+        B->>DB: Claim new Attempt and lease
+        B->>DB: Fenced Finalize: SUCCEEDED + Attempt outcome
+    else Cancellation requested or budget exhausted
+        R->>DB: Settle CANCELLED or DEAD_LETTER
+    end
+    A-->>DB: Late renew / Finalize if old process recovers
+    DB-->>A: Reject expired or mismatched owner / Attempt
+```
 
-Install Docker with Compose. Copy `.env.example` to `.env` and replace the
-PostgreSQL password placeholder with a local development password. `.env` is
-ignored by Git. Redis password is optional for this loopback-only development
-environment. Never use these Compose settings as a production deployment.
-If a port is already occupied, set the corresponding
-`FLOWFORGE_POSTGRES_PUBLISHED_PORT`, `FLOWFORGE_REDIS_PUBLISHED_PORT` or
-`FLOWFORGE_API_PUBLISHED_PORT` in `.env`. Adjust curl URLs and host-run Go
-connection addresses accordingly; internal container addresses stay unchanged.
+Claim, renewal and finalization check the current worker identity, Attempt number,
+RUNNING state and **unexpired PostgreSQL-time lease**. The old owner cannot renew
+or overwrite the new owner's result, even if it resumes later.
+Recovery requires a healthy maintenance loop and reachable PostgreSQL; continued
+delivery/execution also requires healthy workers and Redis. Crashes consume the
+same total Attempt budget as other execution failures.
+
+[Lifecycle contract](docs/job-lifecycle.md) ·
+[Lease and fencing decision](docs/decisions/0005-db-time-leases-and-recovery.md)
+
+## Delivery Semantics
+
+**At-Least-Once:** execution may repeat during failure recovery. A committed
+Job/dispatch intent is reconciled into Redis notifications; publication can
+duplicate, and a crashed execution can be attempted again.
+
+- **Submission idempotency:** an exact global key and the same canonical request
+  replay the original logical Job. A changed request conflicts; replay does not
+  redispatch work or reset its budget.
+- **Execution idempotency:** repeated delivery cannot create concurrent valid DB
+  owners, but the executor may run again after lease expiry.
+- **Business effects:** charges, email and external writes need application-level
+  deduplication or downstream fencing. Database lease fencing protects FlowForge
+  state; it does not make arbitrary external effects exactly once.
+
+## Key Design Decisions
+
+| Decision | Reason and evidence |
+|---|---|
+| PostgreSQL authority and transactional outbox | Persist Job and delivery intent together; reconstruct notifications after Redis loss. [ADR 0003](docs/decisions/0003-durable-dispatch-and-single-worker.md) |
+| DB-time execution leases | Ownership expires against one database clock; stale writes fail fencing checks. [ADR 0005](docs/decisions/0005-db-time-leases-and-recovery.md) |
+| Fixed worker slots | Bound in-flight deliveries, executions and connection use. [ADR 0004](docs/decisions/0004-fixed-worker-pool.md) |
+| Minimal Redis messages | Keep payload/state in PostgreSQL and share a small delivery protocol. [ADR 0003](docs/decisions/0003-durable-dispatch-and-single-worker.md) |
+| Explicit retry budget and replay identity | Crashes consume budget; redrive preserves history and original submission identity. [ADR 0006](docs/decisions/0006-budgeted-retries-and-submission-idempotency.md) |
+| REST repair for transient UI hints | Initial connection, reconnect and periodic snapshots restore the UI from authoritative state. [ADR 0009](docs/decisions/0009-dashboard-realtime-resync.md) |
+| Single-host release with safe abort | Validate backup/drain/migration/health gates; preserve data on failure without automatic downgrade. [ADR 0012](docs/decisions/0012-v1-local-production-acceptance.md) |
+
+## Scheduling
+
+Priority is **non-preemptive** and ranks only due Jobs compatible with the claiming
+worker. Delayed Jobs wait for PostgreSQL time without consuming an Attempt or
+execution deadline. Each worker UUID has an immutable canonical capability set;
+Claim requires that set to contain all Job requirements. Unmatched work remains
+durable backlog, with no fairness or matching-latency guarantee.
+
+Recurring templates use fixed intervals. One transaction creates a unique
+`(schedule_id, scheduled_for)` Job and dispatch intent and advances the template
+cursor. After downtime, it creates the oldest due occurrence and skips missed
+middle intervals. Canceling a template prevents future materialization; existing
+Jobs continue. Cron, template editing and pause/resume are unimplemented.
+
+[Scheduling contract and examples](docs/scheduling.md)
+
+## Measured Baseline
+
+Recorded on 2026-10-05 UTC: **SLEEP 25ms**, C=1 per worker, 500 measured Jobs per
+run, three repetitions per worker count and HTTP concurrency 16. Each run used a
+fresh schema-8 PostgreSQL/Redis pair with tmpfs storage; warmups were excluded.
+The Windows/Docker Desktop host had an Intel Core Ultra 7 270K Plus, 24 logical
+cores and ~31.52 GiB RAM (~15.38 GiB in the Linux VM), with desktop background load.
+Go 1.26.8, PostgreSQL 18 and Redis 8.2; metrics enabled, tracing/scrapers disabled.
+
+| Workers | Mean Jobs/s | Min–max Jobs/s | Mean queue P95 (s) | Mean end-to-end P95 (s) |
+|---|---:|---:|---:|---:|
+| 1 | 33.16 | 33.15–33.17 | 14.254 | 14.281 |
+| 4 | 56.94 | 17.80–127.80 | 16.662 | 16.689 |
+| 8 | 140.39 | 95.99–219.78 | 3.542 | 3.568 |
+| 16 | 37.98 | 16.11–81.59 | 22.236 | 22.263 |
+
+Values are copied from the recorded aggregates: arithmetic means of per-run
+throughput and per-run P95s, **not pooled-job percentiles**. All 6,000 measured
+Jobs succeeded with zero submit/terminal/poll errors; every repetition is retained.
+Large variance and slower high-count runs do **not establish linear scalability**.
+These machine/workload-specific results are not a production SLA; tmpfs and SLEEP
+do not represent production storage or CPU work. No causal profiling was performed.
+
+[Full environment, raw repetitions and limitations](docs/benchmarks/phase-9-baseline.md)
+
+## Reliability Validation
+
+The [formal release/main CI](https://github.com/Daniel-Cpz/FlowForge/actions/runs/37315890293)
+and [publication receipt main CI](https://github.com/Daniel-Cpz/FlowForge/actions/runs/37317589831)
+passed. Recorded coverage includes:
+
+- Hard-kill → lease expiry → failed old Attempt → new Attempt → success;
+  late-owner fencing, retry budgets, DLQ/redrive and cancellation.
+- Bounded graceful shutdown and dependency-failure behavior.
+- Production-like Compose with PostgreSQL TLS, Redis authentication, private
+  gateway access and internal metrics; HTTPS tested using a disposable trusted CA.
+- WebSocket reconnect and REST repair against real services.
+- Custom-format PostgreSQL backup/restore identity checks and volume restart
+  persistence; deployment preflight failures safely abort.
+
+[Completion evidence](docs/reports/phase-10-completion.md) ·
+[Independent release review](docs/reports/v1.0.0-release-review.md)
+
+## Quick Start
+
+Clone with repository access, then use Docker with Compose and a **fresh compatible
+database**. Copy the environment file and replace its PostgreSQL password placeholder
+before starting. Root Compose is a loopback development/demo environment.
 
 ```sh
+git clone https://github.com/Daniel-Cpz/FlowForge.git
+cd FlowForge
 cp .env.example .env
-# Edit .env before continuing.
+# Edit .env with a local development password; check host ports are free.
 docker compose up --build -d
 docker compose ps
-curl http://localhost:8080/health
 curl http://localhost:8080/ready
 ```
 
-PowerShell: use `Copy-Item .env.example .env` and `curl.exe`. Compose loads `.env`
-automatically. PostgreSQL connectivity is required at process startup; Redis
-outages use bounded worker retry loops and make API readiness fail.
-The migration service applies schema versions before API and worker startup.
-The API's readiness check also detects missing jobs/outbox/worker registry columns.
+Wait for `/ready` to return 200, then submit and inspect a demonstration Job:
 
 ```sh
 curl -i -X POST http://localhost:8080/api/v1/jobs \
   -H 'Content-Type: application/json' \
   -d '{"type":"SLEEP","payload":{"duration_ms":250}}'
-curl http://localhost:8080/api/v1/jobs
-# Replace UUID with the id returned above:
+# Replace UUID with the returned id:
 curl http://localhost:8080/api/v1/jobs/UUID
+curl http://localhost:8080/api/v1/jobs/UUID/attempts
 ```
 
-### API contract
+PowerShell: use `Copy-Item .env.example .env` and `curl.exe`; see
+[local setup and commands](docs/development.md). Port overrides live in `.env`.
+The retained schema-4 fixture has legacy duplicate keys: follow the
+[upgrade preflight](docs/worker-operations.md#upgrade-preflight) before reusing it.
 
-Phase 1 tightens the creation envelope and replaces the early offset contract
-with cursor pagination. No external consumer or stable offset compatibility
-commitment was found. `offset` now returns 400.
+## API Overview
 
-| Method | Path | Behavior |
-|---|---|---|
-| GET | `/health` | Process alive, `200 {"status":"ok"}`; independent of dependencies |
-| GET | `/ready` | PostgreSQL, Redis and jobs/outbox/worker registry schema ready: 200; otherwise 503 |
-| POST | `/api/v1/jobs` | First create/no key 201; keyed replay 200; key conflict 409; Location identifies original Job |
-| GET | `/api/v1/jobs/{id}` | Job by UUID; 404 if absent, 400 if malformed |
-| GET | `/api/v1/jobs?limit=20&cursor=...` | Exclusive cursor pagination by `(created_at DESC, id DESC)` |
-| POST | `/api/v1/jobs/{id}/cancel` | Durable user cancellation; 200 idempotent CANCELLED, 409 other terminal states |
-| GET | `/api/v1/dead-letter?limit=20&cursor=...` | DEAD_LETTER only, same creation-time cursor order |
-| GET | `/api/v1/jobs/{id}/attempts` | Complete history ordered by attempt_number (at most 100) |
-| POST | `/api/v1/jobs/{id}/retry` | Explicit DEAD_LETTER redrive, +1 budget up to 100, history retained |
-| POST | `/api/v1/schedules` | Fixed-interval template; 201 + Location |
-| GET | `/api/v1/schedules/{id}` | Schedule by UUID; 404 SCHEDULE_NOT_FOUND |
-| POST | `/api/v1/schedules/{id}/cancel` | Idempotent future-occurrence cancellation; existing Jobs continue |
-| GET | `/api/v1/dashboard/summary` | One PG statement: job/worker/schedule counts and due QUEUED depth |
-| GET | `/api/v1/workers?limit=20&cursor=...` | Bounded immutable worker UUID DESC pages |
-| GET | `/api/v1/schedules?limit=20&cursor=...` | Bounded `(created_at DESC, id DESC)` pages |
-| GET | `/api/v1/ws` | Bounded transient UI invalidation hints; reconnect requires REST snapshot |
-| GET | `/metrics` | Local/internal Prometheus diagnostics when metrics are enabled |
-
-| Create field | Missing | Explicit null | Supplied value |
-|---|---|---|---|
-| `type` | 400 | 400 | String; trim outer whitespace, retain inner content; 1–128 Unicode characters |
-| `payload` | 400 | Accepted as JSON null | Any JSON object, array, string, number or boolean |
-| `priority` | Default 0 | 400 | Integer 0–100 |
-| `max_attempts` | Default 3 | 400 | Integer 1–100 |
-| `timeout` | Default 300 | 400 | Integer 1–86400 **seconds** |
-| `idempotency_key` | No key | No key | Nonblank string, at most 255 Unicode characters; supplied whitespace is preserved |
-| `scheduled_at` | Immediate | Immediate | RFC3339; UTC microsecond normalization; past is immediately eligible |
-| `required_capabilities` | Empty set | Empty set | At most 16 strings; canonical capability set (below) |
-
-Only those exact lowercase field names are accepted. Unknown, wrong-case,
-duplicate top-level fields (including equivalent escaped key names), and
-server-owned fields return 400. Client-owned `id`, `status`, `result`,
-`attempt_count`, worker/lease fields or generated timestamps are not accepted.
-Numeric fields require JSON integer notation; strings, fractions and exponent
-notation are rejected. Empty/blank type or key values are rejected.
-
-Bodies are capped at 1 MiB before parsing, including requests without a declared
-length (413). Empty bodies, invalid UTF-8, malformed JSON and trailing JSON
-documents return 400. Unpaired surrogate escapes in metadata are rejected.
-PostgreSQL JSONB also rejects Unicode NUL, unpaired surrogates and numbers outside
-its numeric range; client payload failures return 400 without driver details.
-Nested payload duplicate keys retain JSONB's last-value semantics. Only the
-request envelope rejects duplicates; no recursive custom parser is introduced.
-
-`attempt_count` starts at 0. Unset result, worker, lease and execution timestamps
-serialize as null at creation. Time strings are RFC3339 with optional fractional seconds in
-UTC. A non-null idempotency key is an exact global submission key: same canonical request returns the original Job (200), different request returns 409 `IDEMPOTENCY_CONFLICT`. Null/absent keys always create distinct Jobs. Canonical identity is trimmed type, JSONB-semantic payload, priority, original submission max_attempts, timeout, normalized scheduled_at and canonical required_capabilities; generated ID/time are excluded. Replay works at RUNNING/RETRYING/terminal states and never redispatches.
-Priority now governs PostgreSQL Claim; timeout is an attempt execution deadline in seconds. Original submission max_attempts is stored separately from redrive-adjusted execution budget, so keyed replay still compares the original request. Control POST endpoints require no body or query; Attempts accepts no query parameters.
-First create returns the QUEUED representation captured in its Job/outbox transaction;
-a subsequent GET may already show execution progress. JSONB may normalize
-spacing, key order, numeric notation and nested duplicate keys. GET returns the
-same canonical payload representation.
-
-### Asynchronous execution
-
-`SLEEP` is the only executable type (case-sensitive). Its payload is exactly
-`{"duration_ms":250}`: one non-null integer field, **0–10000 milliseconds**
-inclusive, with no extra fields. Fractions, exponent notation, wrong-case keys,
-null, strings and out-of-range values fail execution. The existing Create API
-still accepts arbitrary valid JSON and type strings; unsupported types and
-invalid SLEEP payloads receive 201 then become DEAD_LETTER after a permanent failure with a static result error
-(`unsupported_job_type` or `invalid_sleep_payload`). JSONB's existing last-key
-semantics apply before execution. Success stores
-`{"duration_ms":250,"outcome":"slept"}`.
-
-Each worker process has **C fixed slots**, default 1, and one dispatcher. Set
-`FLOWFORGE_WORKER_CONCURRENCY` to an unsigned decimal integer in **1..32**.
-Each free slot receives one delivery, with no unbounded prefetch. Instances use
-one UUID each and consumers `<worker_id>:<slot>` in a shared stream/group.
-N processes hold at most N*C deliveries and claimed executions. Worker connection
-limits are C+4 PostgreSQL and C+4 Redis sockets; budget other clients too.
-Job + outbox creation is atomic. Publishing and marking outbox
-publication are separate operations, so duplicate messages are expected.
-The dispatcher reads at most 100 intents each second; it also republishes
-still-QUEUED work after 30 seconds. PostgreSQL therefore reconstructs delivery
-after a lost Redis stream or a worker crash before claim. No full payload goes
-into Redis. The consumer group starts at `0`, receives one message at a time,
-and ACKs after terminal or durable RETRYING persistence (or after rejecting a missing, malformed,
-RUNNING or non-QUEUED Job).
-
-An atomic `QUEUED -> RUNNING` claim commits an incremented attempt and lease.
-Concurrent duplicate claims create one current owner. Renew and Finalize require
-that owner, attempt number and a lease still valid at PostgreSQL time. Finalize
-commits Job + Attempt and durable outcome together. `max_attempts` now limits
-**total execution attempts**, including crashes and operational interruptions.
-Only Claim consumes budget; duplicate delivery/replay/promotion never does.
-Failures follow RUNNING -> FAILED -> RETRYING when retryable and budget remains,
-or RUNNING -> FAILED -> DEAD_LETTER when permanent/exhausted. Intermediate FAILED
-is applied in the transaction, not a required observable persisted state.
-
-RETRYING has `retry_at` and no execution owner/lease. Default equal jitter uses
-base=1s, max=30s: cap=min(max,base*2^(attempt-1)), actual delay uniform [cap/2,cap].
-Saturating arithmetic prevents overflow. Set FLOWFORGE_RETRY_BASE_SECONDS (1..60)
-and FLOWFORGE_RETRY_MAX_SECONDS (base..600). PostgreSQL clock determines schedule
-and due time. Bounded concurrent promotion commits RETRYING -> QUEUED and dispatch
-intent reset atomically; dispatcher publishes afterward. Schedule survives restart.
-
-Each process registers a fresh UUID and sends bounded heartbeats. Each active
-execution renews its lease; one reaper per process scans at most 100 expired
-RUNNING Jobs. Recovery closes the old Attempt as FAILED/`lease_expired`, returns
-the Job to budgeted RETRYING or DEAD_LETTER in one transaction. A due retry promoter resets dispatch intent; another
-worker creates a new attempt. Stale owners cannot renew or overwrite its result.
-All authority uses PostgreSQL time. Default lease/renew/heartbeat/offline/reaper
-periods are **15/5/2/10/1 seconds**, configurable within validated bounds in
-[worker operations](docs/worker-operations.md).
-
-Heartbeat or renewal failure stops the pool; uncertain execution is left for
-lease recovery without false success/ACK. A finalize failure also stops the pool;
-the database determines whether a commit actually occurred. SIGINT/SIGTERM
-interrupts SLEEP and attempts bounded retryable `execution_cancelled` settlement
-then ACK, provided its lease is still valid. Expiry wins over late graceful
-finalization. Recovery needs a healthy worker/reaper and reachable PostgreSQL;
-it is **at-least-once delivery**, with no exactly-once side-effect guarantee.
-Old Redis pending entries are retained; recovery publishes a fresh notification.
-Crash/cancellation attempts respect the same max_attempts budget; N+1 cannot run.
-Submission idempotency != exactly-once execution != exactly-once business side
-effect. Lease fencing protects DB writes, not arbitrary external effects.
-See [worker operations](docs/worker-operations.md) and
-[ADR 0006](docs/decisions/0006-budgeted-retries-and-submission-idempotency.md).
-
-Run `./scripts/phase6-smoke.ps1` in PowerShell for isolated real API/idempotency
-and priority/timeout/cancellation/DLQ evidence. It builds a separate image and uses a generated
-DB/key/API port; existing development services/data remain intact. Phase 3/4/5 smoke
-scripts are historical fixtures for their tagged checkpoints, whose FAILED and
-immediate-requeue contracts Phase 6 supersedes.
-
-List accepts only `limit` (default 20, range 1–100) and optional `cursor`.
-Unknown/repeated query parameters, invalid limits and malformed query encoding
-return 400. Its response is:
-
-```json
-{"jobs": [], "next_cursor": null}
-```
-
-When another page exists, `next_cursor` is a string representing the **last
-returned row**. Pass it unchanged to the next request:
-
-```sh
-curl 'http://localhost:8080/api/v1/jobs?limit=2'
-# Copy next_cursor from the response:
-curl 'http://localhost:8080/api/v1/jobs?limit=2&cursor=RETURNED_CURSOR'
-```
-
-The versioned, URL-safe cursor is bounded to 512 characters and validated; invalid
-cursors return 400. Final/empty pages return null, and empty jobs is always `[]`.
-Newer jobs inserted between pages do not shift the traversal of older rows.
-This is not a database snapshot: later inserts behind the boundary may appear.
-Cursors are unsigned boundaries, not authorization tokens. A structurally valid
-constructed cursor is accepted; clients must treat its encoding as opaque.
-
-Errors use `{"error":{"code":"JOB_NOT_FOUND","message":"job not found"}}`.
-Codes distinguish `INVALID_JSON`, `INVALID_INPUT`, `INVALID_ID`, `INVALID_CURSOR`,
-`BODY_TOO_LARGE`, `JOB_NOT_FOUND`, `IDEMPOTENCY_CONFLICT`, `JOB_CONTROL_CONFLICT` and `INTERNAL_ERROR`. Dependency failures,
-unexpected constraint failures and corrupt stored data return a generic 500;
-raw driver errors and secrets are not sent to clients. Readiness failures return
-a generic 503.
-
-### Priority, execution timeout and user control
-
-Priority eligibility also includes the time/capability fences described below.
-
-Priority is non-preemptive: pending publication and Claim rank eligible QUEUED Jobs
-by priority DESC, created_at ASC, id ASC. A short transaction advisory lock serializes
-Claim decisions; a conditional SQL check rejects a lower-ranked delivery without
-an Attempt or budget change. Three 250ms waits permit peer claims to commit;
-a still-deferred notification is ACKed and durable QUEUED intent is reconstructed
-on the existing 30s cadence. Running Jobs are never preempted. High backlog can
-starve lower priority; aging/fairness and strict global FIFO are not implemented.
-
-The Worker starts a context deadline immediately before executor invocation,
-excluding queue/retry/backoff time. SLEEP honors it. TIMED_OUT records
-execution_timeout; the Job follows RUNNING -> TIMED_OUT -> RETRYING or DEAD_LETTER
-under the same total budget. Renewal stops at deadline and joins before fenced
-Finalize. A DB error retains RUNNING/pending for recovery, without false ACK.
-
-Cancel QUEUED/RETRYING atomically persists CANCELLED, clears retry_at and removes
-intent. Old delivery is harmless. Cancel RUNNING records cancel_requested_at;
-GET may still show RUNNING until the current owner observes it at the renewal
-interval and cooperatively cancels execution. Finalize locks the same row and
-honors committed user intent even if local execution returned late success.
-Expired-lease recovery settles requested cancellation as CANCELLED, never retry.
-SKIP LOCKED may defer settlement to the next scan. Cancellation creates no Attempt;
-user_cancelled differs from retryable process interruption execution_cancelled.
-CANCELLED repeated cancel is 200; other terminal states and invalid redrive are
-409 JOB_CONTROL_CONFLICT. No authentication/authorization subsystem is added.
-
-DLQ list uses the same bounded creation-time cursor contract as Job list, filtered
-to DEAD_LETTER. It is not a snapshot. Attempts inspect returns complete preserved
-history and stable error codes. Explicit retry/redrive locks DEAD_LETTER, raises
-max_attempts by one (up to 100), retains attempt_count/history, clears terminal
-metadata and resets dispatch intent atomically. A concurrent redrive conflicts;
-only the next normal Claim creates the new Attempt. Original submission budget
-remains immutable for keyed replay. Persistent per-job logs, DLQ UI and external
-business exactly-once effects remain unimplemented. See [ADR 0007](docs/decisions/0007-priority-timeout-cancellation-dlq.md).
-
-Migration 000006 appends cancellation metadata, original submission budget and
-priority/DLQ indexes. It does not bypass 000005 preflight: the retained development
-DB still has one legacy duplicate-key group and may remain on Phase 4 until
-explicit operator resolution. Acceptance uses isolated compatible DBs. Stop
-workers before down; rolling back 000006 loses cancellation intent and original
-submission-budget metadata, so it is not an operational recovery mechanism.
-### Local Go development
-
-Go commands do not load `.env`. Export its variables in your shell first. With
-Go 1.26+ installed, start dependencies using `docker compose up -d postgres redis`,
-then run `make migrate-up` and `make run-api`. On Windows without Make, run the
-corresponding `go` commands shown in the Makefile.
-
-Without a local Go installation, use the Linux tools container:
-
-```sh
-docker compose --profile tools run --rm tools
-```
-
-This executes formatting/state checks, vet, tests including real PostgreSQL
-and Redis integration, and build. Integration tests create and drop a random isolated
-schema, and verify `current_schema()` on every connection before test queries.
-Redis tests use random `flowforge:test:<UUID>` keys and delete only those keys;
-no FLUSHDB/FLUSHALL is used. Tests do not delete application data. PostgreSQL
-tests require permission to create schemas.
-Standalone `go test ./...` skips integration when neither
-`FLOWFORGE_TEST_POSTGRES_URL` nor `FLOWFORGE_INTEGRATION=1` is set. With the latter,
-normal application PostgreSQL configuration is used. CI supplies a dedicated
-ephemeral PostgreSQL and Redis services and runs integration tests. With host-run
-tests, set `FLOWFORGE_TEST_REDIS_ADDR` (and optional
-`FLOWFORGE_TEST_REDIS_PASSWORD`) as well as the PostgreSQL test URL.
-
-## Delayed, capability-aware and recurring scheduling
-
-Delayed Jobs stay QUEUED until PostgreSQL time reaches scheduled_at, without an
-Attempt before due. Worker capabilities are a canonical immutable set per UUID:
-trim + ASCII lowercase, 1–32 characters matching `[a-z0-9][a-z0-9._-]*`, at most
-16 input items, deduplicate and sort; reject blank/control/non-ASCII tokens.
-Set `FLOWFORGE_WORKER_CAPABILITIES=cpu,ffmpeg`. Claim checks the live worker's
-superset and ranks only its compatible, due Jobs. No capable worker means backlog;
-mismatched notification ACK leaves intent for 30s reconciliation, potentially longer
-under repeated mismatch. Scheduled wait is excluded from execution timeout.
-
-POST /api/v1/schedules takes the Job template fields plus integer interval_seconds
-(1..604800) and optional RFC3339 next_run_at (null/absent defaults to DB now).
-GET /api/v1/schedules/{id} inspects it; POST .../{id}/cancel prevents unmaterialized
-future occurrences idempotently. Existing Jobs continue; Job cancel leaves the
-parent unchanged. No submission key is accepted for schedule templates.
-
-Each worker maintenance loop materializes at most 100 due ACTIVE templates in
-one row-locked transaction: ordinary Job + intent + cursor advancement. The
-unique schedule_id/scheduled_for occurrence prevents duplicate materialization.
-After downtime, one oldest due occurrence is generated per pass, middle missed
-intervals skipped, and next_run_at advances to the first future boundary on the
-original interval grid. Recurring execution still uses existing retry/lease/DLQ.
-Cron, template edits/pause/resume and list UI remain unimplemented.
-
-See [scheduling contract and API examples](docs/scheduling.md) and
-[ADR 0008](docs/decisions/0008-time-capabilities-recurring-schedules.md).
-Run `./scripts/phase7-smoke.ps1` for isolated delayed/capability/recurring process
-acceptance and retained-data audit. Migration 000007 is append-only. Stop
-processes before up/down; down removes scheduling/capability/attribution metadata
-while keeping Jobs/Attempts. Retained development data remains schema 4 with one
-legacy duplicate-key group, pending separately authorized repair; it is not
-upgraded by schema-7 acceptance.
-
-## Development Commands
-
-| Command | Purpose |
+| Endpoint | Purpose |
 |---|---|
-| `make build` | Build API, worker and migration binaries in bin/ |
-| `make test` | All tests (integration requires configured database) |
-| `make test-unit` | Unit tests without external services |
-| `make test-phase-state` | Focused state-validator tests without application services |
-| `make validate-phase-state` | Validate the phase state, report identity, and Git evidence |
-| `make run-api` / `make run-worker` | Run a process using exported configuration |
-| `make docker-up` / `make docker-down` | Start/build or stop development environment |
-| `make migrate-up` | Apply all pending migrations |
-| `make migrate-down` | Roll back **one** migration; destructive to its table |
-| `make fmt` / `make vet` | Format or statically check Go |
+| `GET /health`, `GET /ready` | Process liveness and dependency/schema readiness |
+| `POST /api/v1/jobs` | Submit or replay a logical Job |
+| `GET /api/v1/jobs`, `GET /api/v1/jobs/{id}` | Cursor-paginated list and inspection |
+| `POST /api/v1/jobs/{id}/cancel` | Durable cancellation intent |
+| `GET /api/v1/jobs/{id}/attempts` | Preserved execution history |
+| `GET /api/v1/dead-letter` | Inspect exhausted/permanently failed work |
+| `POST /api/v1/jobs/{id}/retry` | Explicit DLQ redrive with one extra Attempt |
+| `POST /api/v1/schedules`, `GET /api/v1/schedules` | Create/list fixed-interval templates |
+| `GET /api/v1/schedules/{id}`, `POST /api/v1/schedules/{id}/cancel` | Inspect/cancel future occurrences |
+| `GET /api/v1/workers`, `GET /api/v1/dashboard/summary` | Worker registry and snapshot counts |
+| `GET /api/v1/ws` | Transient realtime invalidation hints |
+| `GET /metrics` | Internal Prometheus diagnostics when enabled |
 
-In Docker, migrations can also run with
-`docker compose run --rm migrate /app/migrate up` (or `down`). Stop API/worker
-before rolling back schema. Eight `down` calls remove trace context, scheduling, execution control, retry schema, workers, outbox, attempts and jobs.
-Migration 000003 backfills dispatch intent for existing QUEUED Jobs. Starting the
-Phase 2 worker therefore processes existing queued work; unsupported legacy
-types become DEAD_LETTER under Phase 5. Migration 000004 adds liveness and expiry indexes; pre-lease
-RUNNING Jobs get an immediately expired lease. Recovery still requires consistent
-owned Attempt history, and stops on corrupt history. Do not roll back leases
-while workers run; historical binaries do not enforce the new authority rules.
-Migration 000005 adds retry schedule/budget constraints and global non-null key
-uniqueness. Legacy duplicate keys atomically block upgrade without deleting,
-merging or selecting a winner. Resolve them explicitly before upgrading; do not
-use automatic cleanup. Legacy count >100 also blocks migration; over-budget
-<=100 count freezes max_attempts at actual count, and exhausted QUEUED rows
-normalize to DEAD_LETTER with all Attempt history intact. Old RETRYING rows get
-a DB-time one-second schedule. Down removes new schema objects but never erases
-history/restarts normalized work. [Upgrade preflight](docs/worker-operations.md#upgrade-preflight)
-explains operator review and why mixed old/new processes are unsupported.
+[Full API contract](docs/api.md): fields, errors, strict JSON envelope parsing,
+submission identity, cursor boundaries, control semantics and execution payloads.
 
-Migrations use version tracking, an advisory transaction lock, and one atomic
-transaction per invocation. Applied SQL is immutable; use new versions for
-future changes. Changing passwords in `.env` does not change an existing
-PostgreSQL volume's database role password.
+## Dashboard & Observability
 
-`docker compose down` preserves the PostgreSQL named volume. Explicitly removing
-volumes deletes durable data. Redis uses a named volume, AOF `everysec` and
-`noeviction`; its last second can still be lost on a crash. Durable queued-job
-republication covers lost queue notifications. Redis streams, consumers and
-outbox history have no automatic retention/cleanup yet. All ports bind to loopback.
+The React/TypeScript Dashboard exposes Overview, Jobs/detail/Attempts, Workers,
+Schedules and DLQ controls. WebSocket hints trigger REST refreshes; reconnect and
+30-second reconciliation repair missed hints. Dashboard state comes from PostgreSQL.
 
-## Current Status
+Prometheus/Grafana provide queue, execution and worker diagnostics. OpenTelemetry
+hooks correlate API → dispatch → Attempt using bounded, optional export.
+Job IDs, keys and payloads are excluded from metric labels; telemetry failure
+cannot change durable outcomes. The Collector debug exporter is not durable trace storage.
 
-### Implemented
+[Dashboard setup](docs/development.md#dashboard-setup) ·
+[Metrics, tracing and Grafana](docs/observability.md)
 
-- Go module, separate API / worker processes, structured JSON logging
-- Job, attempt and worker models; centralized state graph and exhaustive tests
-- PostgreSQL and Redis startup checks, connection cleanup, bounded DB operations
-- Job create/get/list service and PostgreSQL repository
-- Transactional up/down migrations, schema constraints and integration tests
-- Health/readiness, bounded HTTP server settings, SIGINT/SIGTERM shutdown
-- Docker development environment, Makefile and CI workflow
-- Architecture, failure model, lifecycle, roadmap and ADR documentation
-- Machine-readable phase tracking, independent report template, and state validator
-- Exact Create field names, duplicate-envelope rejection and explicit null/default semantics
-- Deterministic cursor pagination with same-timestamp tie breaking and bounded cursor parsing
-- Canonical persisted create/read responses and corrupted-row rejection
-- Expanded HTTP/PostgreSQL contract, boundary and failure tests
-- Cursor ADR and explicit transaction decisions, with Create extended in Phase 2
-- Manual/automation prompt-source tracking with strict protocol validation
-- Atomic Job/outbox transaction and existing-QUEUED migration backfill
-- Bounded dispatcher and database-driven queued-job republication
-- Redis Streams consumer group, minimal messages and explicit ACK boundary
-- Fixed worker slots (C=1..32), multiple processes and process UUID / consumer identities
-- PostgreSQL atomic claim and transactional owner/attempt records
-- Unified fail-fast supervision, shared cleanup window and joined shutdown
-- Barrier/race tests and real two-process C=2 smoke with survivor continuation
-- Bounded context-aware SLEEP, deterministic failures and shutdown persistence
-- Real PostgreSQL/Redis E2E, duplicate/failure-window and isolated migration tests
-- Persisted worker liveness, bounded heartbeat/reaper/renew loops and joined shutdown
-- DB-time execution leases, stale-owner fencing and atomic expired-attempt settlement
-- Concurrent reaper, transaction rollback and independent-process crash recovery tests
+## Tech Stack
 
-- Unified total Attempt budget, permanent/retryable failures and DEAD_LETTER exhaustion
-- Durable DB-time RETRYING schedules and bounded equal-jitter exponential backoff
-- Concurrent retry promotion with atomic dispatch-intent reconstruction
-- Global exact-key submission idempotency, explicit 201/200/409 HTTP semantics
-- Concurrent replay/conflict/migration tests and independent-process retry smoke
-- PostgreSQL priority Claim arbitration and stable non-preemptive ordering
-- Attempt deadlines with TIMED_OUT history and budgeted retry/exhaustion
-- Durable queued/retrying/running cancellation and cancellation-aware lease recovery
-- DEAD_LETTER pagination, Attempts inspect, and atomic manual redrive (+1 budget)
-- Phase 6 control/race/rollback regressions and isolated API/process smoke
-- DB-time delayed eligibility and capability-aware priority/Claim fences
-- Immutable canonical Worker capabilities and extended submission identity
-- Fixed-interval templates, atomic bounded occurrence materialization and deduplication
-- Coalesced missed runs, independent schedule/Job cancellation and crash/race validation
-- Phase 7 isolated two-worker API/process smoke with retained-data audit
-- React/TypeScript Overview, Jobs, detail/Attempts, Workers, Schedules and DLQ
-- Server-authoritative REST cancel/redrive with confirmation and conflict feedback
-- Versioned WebSocket hints with separate multi-process Redis Pub/Sub fanout
-- Bounded producer/client buffers, origin/read/idle limits and joined shutdown
-- Reconnect snapshots and 30-second reconciliation of current visible resources
-- Frontend component/reconnect tests and isolated two-API/two-worker/Vite smoke
-- Private Prometheus registries, finite labels, PG global gauges and committed Attempt histograms
-- Optional Prometheus DNS discovery, provisioned Grafana dashboard and OTLP/HTTP Collector
-- Durable internal W3C trace context across dispatch, execution, retry/recovery and control
-- Bounded telemetry queues/pools, graceful metrics shutdown and sanitized correlated logs
-- Isolated crash/Redis/partition/PubSub failure harness and bounded HTTP load generator
-- Repeated 1/4/8/16 Worker SLEEP baseline with raw results and explicit measurement limits
-- Independent production Compose, PostgreSQL TLS, Redis auth and static React/Caddy gateway
-- Private/public overlays, immutable-image deployment tooling, backup/restore and safety gates
-- CI validates production image/config/workflow and failure-path acceptance
+| Layer | Technologies |
+|---|---|
+| Backend | Go 1.26+, standard net/http, log/slog, pgx v5, go-redis v9 |
+| Data / coordination | PostgreSQL 18, Redis 8.2 |
+| Frontend | React, TypeScript, Vite |
+| Observability | Prometheus, Grafana, OpenTelemetry |
+| Infrastructure / validation | Docker, Docker Compose, Caddy, GitHub Actions |
 
-### Validated
+## Feature Matrix
 
-Real PostgreSQL/Redis integration and race checks cover lifecycle, submission
-idempotency, retry/DLQ, priority, cancellation/timeouts, scheduling, lease fencing
-and graceful shutdown. Disposable production-stack acceptance covers actual TLS,
-Redis authentication, static SPA/REST/WS, Worker hard-kill/new Attempt recovery,
-populated backup restore and named-volume restart persistence. See
-[Phase 10 completion evidence](docs/reports/phase-10-completion.md) and historical
-[progress evidence](docs/reports/phase-10-report.md). The final
-[CI regression](https://github.com/Daniel-Cpz/FlowForge/actions/runs/37310265921)
-passed independently of optional publication/deployment.
+| Area | Status |
+|---|---|
+| Durable Job FSM / multi-worker execution / leases and fencing | Implemented; failure cases validated |
+| Submission idempotency / retry / DLQ / timeout / cancellation | Implemented; validated |
+| Priority / capability-aware Claim / delayed / recurring Jobs | Implemented; validated |
+| Dashboard / WebSocket repair / metrics and trace hooks | Implemented; service and frontend tests validated |
+| Production-like Compose / backup / restore / restart | Validated locally and in GitHub CI |
+| Real VPS/EC2 / GHCR publication / protected SSH deployment | Optional; not performed |
+| HA / autoscaling / application users and RBAC | Not implemented |
 
-### Experimental
+## Known Limitations
 
-The production-like single-host Docker reference runtime is validated locally
-and in CI. It has no deployed production SLA. Public-mode tests trust a disposable
-local CA; they do not prove public ACME. SLEEP is the only executor.
+- Execution may repeat; external effects need business idempotency or fencing.
+- Single-host reference topology; no HA, autoscaling or latency/recovery SLA.
+- **SLEEP is the only executable demo Job type**; other types fail permanently.
+- No application users, sessions or RBAC. Keep the development API internal.
+- No real cloud/public ACME validation. **No authorized VPS/EC2 deployment target
+  is currently available.** Local HTTPS evidence uses a disposable CA.
+- Browser E2E, off-host disaster recovery and durable trace storage are not validated.
+- PostgreSQL `sslmode=require` encrypts without certificate identity verification;
+  Redis has authentication without TLS on the private container network.
+- Benchmark results are workload/environment specific; priority can starve work,
+  notification matching has no fairness SLA, and automatic history/stream retention
+  is unimplemented. See [operational limits](docs/worker-operations.md) and
+  [deployment boundaries](docs/deployment.md).
 
-### Planned / Optional Future
+## Documentation
 
-Cron, schedule edit/pause/resume, capability routing, priority aging, persistent per-job logs,
-production alerting/trace storage and broader workload benchmarking. Real VPS/AWS,
-GHCR publication, protected SSH deployment, public DNS/ACME, off-host backups, HA
-and autoscaling are optional; Kubernetes/Terraform only if a future need justifies
-them. These are not a Phase 11 or v1.0.0 completion requirement.
+| Read next | Contents |
+|---|---|
+| [Architecture](docs/architecture.md) / [ADRs](docs/decisions/README.md) | Boundaries, tradeoffs and failure model |
+| [API](docs/api.md) / [Lifecycle](docs/job-lifecycle.md) | Exact requests, states and Attempt semantics |
+| [Worker operations](docs/worker-operations.md) / [Scheduling](docs/scheduling.md) | Leases, budgets, shutdown and eligibility |
+| [Development](docs/development.md) | Environment, commands, migration and retained-data preflight |
+| [Dashboard](docs/dashboard.md) / [Observability](docs/observability.md) | REST repair, UI, metrics and tracing |
+| [Deployment](docs/deployment.md) / [Artifact bundle](deploy/README.md) | Production-like topology and optional authorized deployment |
+| [Benchmarks](docs/benchmarks/phase-9-baseline.md) | Recorded workload, raw repetitions and limits |
+| [Release notes](docs/releases/v1.0.0.md) / [Reports](docs/reports/) | Release and historical acceptance evidence |
+| [Roadmap](docs/development-roadmap.md) / [Automation protocol](docs/phase-automation.md) | Development history and handoff rules |
 
-## Roadmap
+## Project Evolution
 
-Phase 1 delivers **Job Persistence + API Correctness**. Phase 2 implements
-**Redis Queue + Single Worker Execution** with a durable database outbox.
-Phase 3 implements **Multiple Workers + Bounded Concurrency**.
-Phase 4 implements **Heartbeat + Lease + Crash Recovery**.
-Phase 5 implements **Retry + Backoff + Jitter + Submission Idempotency**. Phase 6 implements **Priority + Timeout + User Cancellation + DLQ**. Phase 7 implements **Delayed Jobs + Capability-aware Claim + Recurring Schedules**. Phase 8 implements **Dashboard + WebSocket hints + REST resync**. Phase 9 implements **Observability + Failure Injection + Local Benchmarks**. Phase 10 — **Production Hardening + CI + Local Release Acceptance — Completed** under the owner's revised scope. Cloud deployment is optional; roadmap 0–10 is complete, with no Phase 11 generated.
-See the [Phase 0–10 roadmap](docs/development-roadmap.md) and authoritative phase state.
-The [Phase 1 report](docs/reports/phase-1-report.md) records its validation and Git checkpoint.
-The [Phase 2 report](docs/reports/phase-2-report.md) records execution/durability evidence.
-The [Phase 3 report](docs/reports/phase-3-report.md) records concurrency/process evidence.
-The [Phase 4 report](docs/reports/phase-4-report.md) records lease/fencing/recovery evidence.
-The [Phase 5 report](docs/reports/phase-5-report.md) records retry/idempotency/migration evidence.
-The [Phase 6 report](docs/reports/phase-6-report.md) records scheduling/control/DLQ evidence.
-The [Phase 7 report](docs/reports/phase-7-report.md) records delayed/capability/recurring evidence.
-The [Phase 8 report](docs/reports/phase-8-report.md) records Dashboard/realtime/resync evidence.
-The [Phase 9 report](docs/reports/phase-9-report.md) records observability/failure/benchmark evidence.
-The [Phase 10 completion report](docs/reports/phase-10-completion.md) records the
-owner scope adjustment and final acceptance, preserving the original BLOCKED progress report.
-This repository does not claim exactly-once execution. Delivery is at-least-once;
-business side effects need their own idempotency safeguards.
+v1.0.0 represents ten incremental engineering phases:
 
-## Development Phases / Automation
+```text
+Persistence/API → Queue/Worker → Multi-Worker Concurrency → Lease Recovery
+→ Retry/Idempotency → Control/DLQ → Scheduling → Dashboard
+→ Observability/Benchmark → Production Hardening
+```
 
-This README describes the **whole project**: its purpose, architecture, setup,
-and current capabilities. Each phase has its own completion report (normally `docs/reports/phase-N-report.md`;
-Phase 10 uses `docs/reports/phase-10-completion.md` to retain its historical progress report)
-for that phase's scope, tests, failures, limitations, and Git references. Both
-documents are required at phase completion and are updated independently.
-Keep reports from earlier phases.
-
-- [Phase state](automation/state.json): machine-readable current phase and status
-- [Phase reports](docs/reports/index.md): independent evidence and report index
-- [Report template](docs/phase-report-template.md): required report sections
-- [Automation protocol](docs/phase-automation.md): schema, completion gates, and handoff
-- `automation/prompts/`: phase prompts written by external Automation
-
-GitHub repository state is the shared automation source of truth. Automation
-reads `status`, `report`, `last_processed_phase`, and `next_prompt` from state,
-then reads the exact matching report. This README does not substitute for a
-phase report. Completion is published only after tests, README, the independent
-phase report and real Git evidence pass their gates. The separate infrastructure
-report does not complete Phase 1.
-
-FlowForge supports both manual and automation-generated phase prompts. The
-current Phase 10 finalization source is `manual`, with null prompt_path. The original
-`automation/prompts/phase-10.md` remains unchanged history; explicit owner instructions
-supersede its cloud completion gates via ADR 0012.
-Phase 1 used manual input, with no prompt file required.
-Automated prompts must have an existing current-phase file.
-`prompt_path` tracks the current phase's source; `next_prompt` tracks an externally
-prepared next phase. Both sources use the same completion gates. Explicit user
-instructions may supersede an unstarted automated prompt; Automation must not
-silently change a phase already in progress. Full rules are in the protocol.
-
-Validate with `go run ./scripts/validate-phase-state`; run focused tests with
-`go test -count=1 ./scripts/validate-phase-state` or the matching Make targets.
-
-## Dashboard (local/demo)
-
-The React/TypeScript Dashboard reads REST/PostgreSQL snapshots. WebSocket hints
-use a separate `<FLOWFORGE_REDIS_STREAM>:ui:v1` Pub/Sub channel. Reconnection and
-30-second reconciliation refresh visible resources; hints never deliver tasks
-or rebuild authoritative state. Queue depth counts due QUEUED Jobs with budget,
-including jobs without a matching capability Worker. Metrics use the separate
-Prometheus/Grafana stack; the Dashboard links to its provisioned overview.
-
-Use Node 24: `cd web && npm ci && npm run dev`, with a compatible API on 8080.
-Vite proxies REST and WS. On a **fresh compatible DB**,
-`docker compose --profile dashboard up --build` starts the local frontend too.
-The retained development DB remains schema 4 with one legacy duplicate-key group;
-do not run that upgrade command against it. `./scripts/phase8-smoke.ps1` creates,
-tests and removes its own compatible DB/stream/channel and containers instead.
-It uses real WS clients; browser E2E is NOT RUN.
-
-This control plane has no authentication and is intended for loopback/local
-demonstration. Optional public deployment uses Phase 10 gateway HTTPS/Basic Auth
-and exact WS origins; application users/sessions/RBAC are still unimplemented.
-See [Dashboard contract](docs/dashboard.md), [frontend setup](web/README.md) and
-[ADR 0009](docs/decisions/0009-dashboard-realtime-resync.md).
-
-## Observability and measured baseline (local/demo)
-
-On a fresh compatible DB, `docker compose --profile observability up --build --scale worker=2`
-starts Prometheus at localhost:9090 and Grafana at localhost:3000/d/flowforge-overview.
-API `/metrics` and internal Worker `:9091/metrics` use finite labels. Global PG
-gauges must use max across API replicas; process counters use sum/rate. Keep these
-unauthenticated endpoints internal/loopback. OTel export defaults disabled;
-set `FLOWFORGE_OTEL_ENABLED=true` for internal OTLP/HTTP Collector debug output.
-Trace context is internal schema-8 metadata, excluded from submission identity,
-ordinary API JSON and Redis messages. Telemetry failure cannot grant execution
-authority or change a committed outcome.
-
-Use `./scripts/phase9-failure.ps1` and `./scripts/phase9-benchmark.ps1` for isolated
-resources with finally cleanup and retained-data audit. The retained schema-4 DB
-and its duplicate-key blocker are preserved. See [observability](docs/observability.md),
-[recorded baseline](docs/benchmarks/phase-9-baseline.md) and [ADR 0010](docs/decisions/0010-observability-cardinality-trace-isolation.md).
-The SLEEP baseline applies only to its recorded machine, concurrency, code and
-workload; it is not a production latency, scalability or reliability SLA.
-
-## Production hardening and local release acceptance (Phase 10)
-
-Independent production Compose builds no server images. A lockfile static React
-image runs behind Caddy; private mode (selected) exposes only loopback8180 through
-SSH. Optional public mode requires HTTPS/Basic Auth. Production PG uses real TLS,
-Redis a generated strong password, internal metrics/dependencies stay private.
-Optional dispatch-only GHCR/digest release and protected deploy workflows implement locking,
-backup/drain/migrate/health gates and atomic release metadata. Failure defaults
-to safe abort; no automatic schema downgrade or guessed image rollback.
-
-See [deployment/runbook](docs/deployment.md), [bundle](deploy/README.md) and
-[Phase 10 completion](docs/reports/phase-10-completion.md). CI and local image/
-config/failure validation are verified; GHCR publication, real SSH/protected
-Environment deployment and cloud acceptance are not executed and are optional.
-Default2 Workers/C1 reflects Phase9
-benchmark limits. Retained schema4 DB is untouched. Phase10
-is the final numbered roadmap phase; no Phase11 is generated.
-
-**Not deployed to a real VPS/EC2 by project scope decision.** ADR 0012 formally
-removes real cloud/GHCR/deployment gates from v1.0.0. The historical progress
-report remains BLOCKED under its original scope. Any optional future deployment
-requires an authorized target, `flowforge-cloud` Environment, SSH key and trusted
-`known_hosts`; strict host verification and all safety gates remain intact.
-
-**[FlowForge v1.0.0 — Released](https://github.com/Daniel-Cpz/FlowForge/releases/tag/v1.0.0)**.
-[Independent review](docs/reports/v1.0.0-release-review.md) and main CI PASS;
-annotated tag and published GitHub Release independently verified.
-[Publication receipt](docs/reports/v1.0.0-release.md) records actual commit, tag,
-CI and Release IDs. [Release notes](docs/releases/v1.0.0.md) contain the scope and limits.
-`main` is the shared source. Lifecycle: **Maintenance / Portfolio**. No Phase 11.
-This later documentation receipt records successful publication; the immutable
-tag retains all reviewed release contents and is not moved.
+The roadmap is complete. Further work requires an owner decision; no Phase 11 is
+planned by this documentation update. Historical reports retain their original
+scope and evidence. The v1.0.0 tag and Release remain immutable; portfolio
+documentation evolves on post-release `main`.
 
 ## License
 
